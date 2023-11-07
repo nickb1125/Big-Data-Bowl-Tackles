@@ -1,0 +1,88 @@
+---
+title: "plot.Rmd"
+author: "Nick R. Bachelder"
+date: "2023-11-07"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(here)
+library(dplyr)
+library(gtsummary)
+library(ggplot2)
+library(plyr)
+library(gganimate)
+library(ggforce)
+library(animation)
+library(ggrepel)
+```
+
+```{r}
+games <- read.csv(here::here("data/nfl-big-data-bowl-2024/games.csv"))
+players <- read.csv(here::here("data/nfl-big-data-bowl-2024/players.csv")) %>% 
+  rowwise() %>% dplyr::mutate(height = as.numeric(sub("\\-.*", "", height))*12 + as.numeric(sub('.+-(.+)', '\\1', height))) %>% ungroup() %>%
+  dplyr::select(displayName, nflId, height, weight, position)
+plays <- read.csv(here::here("data/nfl-big-data-bowl-2024/plays.csv"))
+tackles <- read.csv(here::here("data/nfl-big-data-bowl-2024/tackles.csv"))
+tracking <- do.call(rbind, lapply(seq(1, 9), function(week) {read.csv(here::here(paste0("data/nfl-big-data-bowl-2024/tracking_week_", week, ".csv")))}))
+```
+
+```{r}
+plot_play <- function(game_id, play_id, pred_df) {
+  tacklers <- unique((tackles %>% filter(gameId == game_id, playId == play_id, (tackle == 1 | assist == 1)))$nflId)
+  missed_tacklers <- unique((tackles %>% filter(gameId == game_id, playId == play_id, (pff_missedTackle == 1)))$nflId)
+  play_df <- tracking %>% filter(gameId == game_id, playId == play_id) %>% left_join(players, by = c("displayName", "nflId")) %>%
+    dplyr::mutate(type = case_when(position %in% c("QB", "TE",  "WR", "G", "OLB", "RB", "C", "FB") ~ "offense", 
+                             is.na(nflId) ~ "ball",
+                             nflId %in% tacklers ~ "tackler",
+                             nflId %in% missed_tacklers ~ "missed tackler",
+                             TRUE ~ "defense")) %>% 
+    group_by(frameId) %>% 
+    dplyr::mutate(ball_x = min(x[type == "ball"]), ball_y = min(y[type == "ball"])) %>% ungroup()
+  describe <- (plays %>% filter(gameId == game_id, playId == play_id))$playDescription[1]
+  all_frames <- unique(play_df$frameId)
+  play_tweened <- play_df %>%
+    tweenr::tween_components(time = frameId, 
+                           id   = nflId, 
+                           ease = "linear", 
+                           nframes = max(play_df$frameId))
+  oopt = ani.options(interval = 1/10)
+  saveGIF({for (i in 1:length(all_frames)) {
+    play_df_frame <- play_df %>% filter(frameId == i)
+    play_df_frame <- play_df %>% filter(frameId == i)
+    min_x = 0
+    max_x = 120
+    min_y = 0
+    max_y = 54
+    p <- ggplot() +
+      geom_tile(data = pred_df, aes(x = x, y = y, fill = prob), width = 10, height = 10)  +
+      scale_fill_gradient(low = "white", high = "red") + 
+      geom_point(data = play_df_frame, aes(x = x, y = y, color = type), shape = 23, size = 6) +
+          geom_vline(aes(xintercept = seq(round_any(min_x, 5, f = floor), 
+                                        round_any(max_x, 5, f = ceiling), by = 5)), 
+                   color = 'black') +
+        geom_segment(aes(x = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
+                         y = rep(70.9 / 3 - 0.5, length(seq(round_any(min_x, 5, f = floor), 
+                                                               round_any(max_x, 5, f = ceiling), by = 1 )) ), 
+                         xend = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
+                         yend = rep(70.9 / 3 + 0.5, length(seq(round_any(min_x, 5, f = floor), 
+                                                               round_any(max_x, 5, f = ceiling), by = 1 ))) ), 
+                     color = 'black') +
+        geom_segment(aes(x = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
+                         y = rep(70.8 / 3 + 18.5 / 3 - 0.5, length(seq(round_any(min_x, 5, f = floor), 
+                                                               round_any(max_x, 5, f = ceiling), by = 1 )) ), 
+                         xend = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
+                         yend = rep(70.8 / 3 + 18.5 / 3 + 0.5, length(seq(round_any(min_x, 5, f = floor), 
+                                                               round_any(max_x, 5, f = ceiling), by = 1 ))) ), 
+                     color = 'black') + xlim(0, 120) + ylim(0, 54) + theme_minimal() + ylab("") + xlab("") + 
+      labs(title = "Tackle Classifier Example", x = "", y = "", caption = describe)
+    print(p)
+    print(paste0(i, " out of ", length(all_frames)))
+    ani.pause()}
+  },movie.name="facet_zoom.gif",ani.width = 400, ani.height = 300)
+}
+
+pred_df <- read.csv("game_2022101300_play_826.csv") %>% dplyr::select(-X) 
+plot_play(game_id=2022101300, play_id=826, pred_df = pred_df) 
+```
