@@ -34,7 +34,7 @@ model = TackleNet(N = 10, nvar = 24)
 optimizer = optim.Adam(model.parameters(), lr=0.0005)
 
 # Training loop
-num_epochs = 25
+num_epochs = 50
 
 print("Training TackleNet...")
 print("---------------------")
@@ -94,5 +94,25 @@ for epoch in range(num_epochs):
     print(f"Validation Loss: {val_loss}")
     print(f"Validation Accuracy: {acc}")
 
+plt.figure(figsize=(10, 5))
+plt.plot(losses, label='Training Loss')
+plt.plot(val_losses, label='Validation Loss')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.title('Loss Over Time')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+plt.figure(figsize=(10, 5))
+plt.plot(val_accuracy, label='Training Loss')
+plt.xlabel('Epoch')
+plt.ylabel('Validation Accuracy')
+plt.title('Validation Binary Prediction Accuracy Over Time')
+plt.legend()
+plt.grid(True)
+plt.show()
+
 with open("model.pkl", f'wb') as outp:  # Overwrites any existing file.
     pickle.dump(model, outp, pickle.HIGHEST_PROTOCOL)
+

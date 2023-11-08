@@ -82,7 +82,9 @@ plot_play <- function(game_id, play_id, pred_df) {
     ani.pause()}
   },movie.name="facet_zoom.gif",ani.width = 400, ani.height = 300)
 }
+```
 
-pred_df <- read.csv("game_2022101300_play_826.csv") %>% dplyr::select(-X) 
+```{r}
+pred_df <- read.csv("/Users/nickbachelder/Desktop/Personal Code/Kaggle/Tackles/2022101300_826.csv") %>% dplyr::select(-X) 
 plot_play(game_id=2022101300, play_id=826, pred_df = pred_df) 
 ```

@@ -14,9 +14,10 @@ from sklearn.model_selection import train_test_split
 import random
 
 class play:
-    def __init__(self, game_id, play_id):
+    def __init__(self, game_id, play_id, plays, tracking, ball_tracking, tackles, players):
+        self.players = players
         self.play = plays.query("gameId == @game_id & playId ==  @play_id")
-        self.ball_carry_id = ball_carrier = self.play.ballCarrierId.reset_index(drop =1)[0]
+        self.ball_carry_id = self.play.ballCarrierId.reset_index(drop =1)[0]
         self.tracking_df = tracking.query("gameId == @game_id & playId ==  @play_id")
         self.ball_track = ball_tracking.query("gameId == @game_id & playId ==  @play_id")
         self.tackle_oppurtunities = tackles.query("gameId == @game_id & playId ==  @play_id")
@@ -25,12 +26,9 @@ class play:
         self.tracking_refined = {frame_id : self.refine_tracking(frame_id = frame_id) for frame_id in range(1, self.num_frames)}
         self.tracking_refined_stratified = {frame_id : {player_type : self.tracking_refined.get(frame_id).loc[(self.tracking_refined.get(frame_id)['type'] == player_type)] 
                                                         for player_type in ["Offense", "Defense", "Carrier"]} for frame_id in range(1, self.num_frames)}
-        self.images_10 = self.get_all_grid_features(N = 10)
     
     def get_end_of_play_location(self):
-        ball_carrier = self.ball_carry_id
-        last_frame = self.num_frames
-        end_of_play_carrier = self.tracking_df.query("nflId == @ball_carrier & frameId == @last_frame")
+        end_of_play_carrier = self.tracking_df.query("nflId == @self.ball_carry_id & frameId == @self.num_frames")
         return end_of_play_carrier[["frameId", "x", "y"]].rename({"x" : "eop_x", "y" : "eop_y"}, axis = 1)
     
     def get_end_of_play_matrix(self, N):
@@ -40,7 +38,7 @@ class play:
         return tackles_attempt_mat
     
     def refine_tracking(self, frame_id):
-        current_positions = self.tracking_df.query("frameId == @frame_id").merge(players, on = "nflId", how = "left")
+        current_positions = self.tracking_df.query("frameId == @frame_id").merge(self.players, on = "nflId", how = "left")
         current_positions['type'] = current_positions['position'].apply(
             lambda x: "Offense" if x in ["QB", "TE", "WR", "G", "OLB", "RB", "C", "FB"] else "Defense")
         current_positions['type'] = current_positions.apply(lambda row: 'Ball' if pd.isna(row['nflId']) else row['type'], axis=1)
@@ -137,7 +135,7 @@ class play:
         outputs = []
         pred_df = pd.DataFrame()
         for frame_id in range(1, self.num_frames):
-            image = self.images_10[frame_id]
+            image = self.get_grid_features(frame_id = frame_id, N = model.N)
             image = image[None, :, :, :]
             output = model(torch.FloatTensor(image)).detach().numpy()
             for x in range(output.shape[1]):
@@ -169,15 +167,15 @@ class TackleNet(nn.Module):
         super(TackleNet, self).__init__()
         
         # Convolutional layers
-        self.conv1 = nn.Conv2d(nvar, 32, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv2d(32, 20, kernel_size=3, padding=1)
-        self.conv3 = nn.Conv2d(20, 10, kernel_size=3, padding=1)
-        self.conv4 = nn.Conv2d(10, 20, kernel_size=3, padding=1)
-        # self.pool = nn.MaxPool2d(3, stride=2)
+        self.conv1 = nn.Conv2d(nvar, 20, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(20, 10, kernel_size=3, padding=1)
+        self.conv3 = nn.Conv2d(10, 5, kernel_size=3, padding=1)
+        self.conv4 = nn.Conv2d(5, 3, kernel_size=3, padding=1)
+        self.pool = nn.MaxPool2d(kernel_size = 3, stride=2)
         
         # Fully connected layers
-        self.fc1 = nn.Linear(math.ceil(120/N)*math.ceil(54/N)*20, 128)
-        self.fc2 = nn.Linear(128, math.ceil(120/N)*math.ceil(54/N))
+        self.fc1 = nn.Linear(math.ceil(120/N)*math.ceil(54/N)*3, 64)
+        self.fc2 = nn.Linear(64, math.ceil(120/N)*math.ceil(54/N))
         self.N = N
         
     def forward(self, x):

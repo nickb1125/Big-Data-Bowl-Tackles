@@ -35,27 +35,19 @@ tackles = pd.read_csv("data/nfl-big-data-bowl-2024/tackles.csv")
 tracking = pd.concat([pd.read_csv(f"data/nfl-big-data-bowl-2024/tracking_week_{week}.csv") for week in range(1, 10)])
 ball_tracking = tracking.loc[tracking['nflId'].isna()][["gameId", "frameId", "playId", "x", "y"]].rename({"x" : "ball_x", "y" : "ball_y"}, axis = 1)
 
-N = 10
-print("Getting training and validation images....")
-print(f"(Using N = {N})")
-print("------------------------------------------")
 
-# Choose random frame from each play
+print("Predicting")
+print("-----------------")
 
-images = []
-labels = []
-for row in tqdm(plays.playId):
-    play_row = plays.iloc[row,]
-    play_object = play(play_row.gameId, play_row.playId, plays, tracking, ball_tracking, tackles, players)
-    frame_id = random.randint(1, play_object.num_frames)
-    if play_object.num_frames <= frame_id:
-        continue # if not n frames happened
-    if len(play_object.tracking_refined.get(1).type.unique()) != 4:
-        continue # if not offense, defense, ball and carrier in play
-    images.append(play_object.get_grid_features(frame_id = frame_id, N = N))
-    labels.append(play_object.get_end_of_play_matrix(N = N))
-tackle_dataset = TackleAttemptDataset(images = images, labels = labels)
+# Get model
 
-with open("data/tackle_images.pkl", f'wb') as outp:  # Overwrites any existing file.
-    pickle.dump(tackle_dataset, outp, pickle.HIGHEST_PROTOCOL)
+with open('model.pkl', 'rb') as f:
+    model = pickle.load(f)
 
+# Predict
+
+game_id = 2022100908
+play_id = 3537
+
+play_object = play(game_id, play_id, plays, tracking, ball_tracking, tackles, players)
+play_object.predict_tackle_distribution(model = model).to_csv(f"{game_id}_{play_id}.csv")
