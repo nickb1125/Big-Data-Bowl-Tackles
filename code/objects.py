@@ -34,6 +34,12 @@ class play:
     def get_end_of_play_matrix(self, N):
         tackles_attempt_mat = np.zeros((int(120/N), math.ceil(54/N)))
         for item in list(zip(self.eop.eop_x, self.eop.eop_y)):
+            if item[0] > 120:
+                item = list(item)
+                item[0] = 120
+            if item[1] > 54:
+                item = list(item)
+                item[1] = 54
             tackles_attempt_mat[int(item[0]/N), int(item[1]/N)] = 1
         return tackles_attempt_mat
     
@@ -43,90 +49,119 @@ class play:
             lambda x: "Offense" if x in ["QB", "TE", "WR", "G", "OLB", "RB", "C", "FB"] else "Defense")
         current_positions['type'] = current_positions.apply(lambda row: 'Ball' if pd.isna(row['nflId']) else row['type'], axis=1)
         current_positions.loc[current_positions.nflId == self.ball_carry_id, 'type'] = "Carrier"
-        current_positions['dir_rad'] = np.radians(current_positions['dir']) # degrees point in y direction
+        current_positions['dir_rad'] = np.radians(current_positions['dir']) # fix degrees
         current_positions['Sx'] = current_positions['s'] * np.cos(current_positions['dir_rad'])
         current_positions['Sy'] = current_positions['s'] * np.sin(current_positions['dir_rad'])
         current_positions['Ax'] = current_positions['a'] * np.cos(current_positions['dir_rad'])
         current_positions['Ay'] = current_positions['a'] * np.sin(current_positions['dir_rad'])
         return current_positions[['nflId', 'x', 'y', 'Sx', 'Sy', 'Ax', 'Ay', 's', 'a', 'dis', 'o', 'dir', 'dir_rad', 'height', 'weight', 'type']]
-    
-    def get_grid_features(self, frame_id, N, matrix_form = True):
+
+    def get_grid_features(self, frame_id, N, matrix_form = True, plot = None):
         stratified_dfs = self.tracking_refined_stratified[frame_id]
         grid_features = pd.DataFrame()
-        return_mat = np.zeros((24, len(list(range(0, 120, N))), len(list(range(0, 54, N)))))
+        return_mat = np.zeros((12, len(list(range(0, 120, N))), len(list(range(0, 54, N)))))
+        off_df = stratified_dfs["Offense"]
+        def_df = stratified_dfs["Defense"]
+        ball_df = stratified_dfs["Carrier"]
         for x_low in list(range(0, 120, N)):
             for y_low in list(range(0, 54, N)):
-                off_df = stratified_dfs["Offense"]
-                def_df = stratified_dfs["Defense"]
-                ball_df = stratified_dfs["Carrier"]
                 x_high = x_low + N
                 y_high = y_low + N
 
-                    # Extract relevant subsets of data
+                # Extract relevant subsets of data
                 off_subset = off_df[(off_df['x'] >= x_low) & (off_df['x'] < x_high) & (off_df['y'] >= y_low) & (off_df['y'] < y_high)]
                 def_subset = def_df[(def_df['x'] >= x_low) & (def_df['x'] < x_high) & (def_df['y'] >= y_low) & (def_df['y'] < y_high)]
                 ball_subset = ball_df[(ball_df['x'] >= x_low) & (ball_df['x'] < x_high) & (ball_df['y'] >= y_low) & (ball_df['y'] < y_high)]
 
-                # Calculate statistics using vectorized operations
-                current_offensive_player_density = len(off_subset)
-                current_defensive_player_density = len(def_subset)
-                current_ballcarrier_player_density = len(ball_subset)
-
-                offense_directional_vector = np.cos(off_df['dir'] * (np.pi / 180)) * (x_low + N/2 - off_df['x']) + np.sin(off_df['dir'] * (math.pi / 180)) * (y_low + N/2 - off_df['y'])
-                defense_directional_vector = np.cos(def_df['dir'] * (np.pi / 180)) * (x_low + N/2 - def_df['x']) + np.sin(def_df['dir'] * (math.pi / 180)) * (y_low + N/2 - def_df['y'])
-
-                velocities_offensive_toward_point = off_df['s'] * offense_directional_vector
-                velocities_defensive_toward_point = def_df['s'] * defense_directional_vector
-                
-                acceleration_offensive_toward_point = off_df['a'] * offense_directional_vector
-                acceleration_defensive_toward_point = def_df['a'] * defense_directional_vector
-
+                # Distance
+                distance_offense_from_ballcarrier = np.sqrt((off_df['x'] - ball_df['x'].values[0])**2 + (off_df['y'] - ball_df['y'].values[0])**2)
+                distance_defense_from_ballcarrier = np.sqrt((def_df['x'] - ball_df['x'].values[0])**2 + (def_df['y'] - ball_df['y'].values[0])**2)
                 distance_offense_from_point = np.sqrt((off_df['x'] - (x_low + N/2))**2 + (off_df['y'] - (y_low + N/2))**2)
-                distance_defensive_from_point = np.sqrt((def_df['x'] - (x_low + N/2))**2 + (def_df['y'] - (y_low + N/2))**2)
-
-                velocities_ballcarrier_toward_point = ball_df['s'] * (np.cos(ball_df['dir'] * (math.pi / 180)) * (x_low + N/2 - ball_df['x']) +
-                                                                    np.sin(ball_df['dir'] * (math.pi / 180)) * (y_low + N/2 - ball_df['y']))
-                acceleration_ballcarrier_toward_point = ball_df['a'] * (np.cos(ball_df['dir'] * (math.pi / 180)) * (x_low + N/2 - ball_df['x']) +
-                                                                        np.sin(ball_df['dir'] * (math.pi / 180)) * (y_low + N/2 - ball_df['y']))
+                distance_defense_from_point = np.sqrt((def_df['x'] - (x_low + N/2))**2 + (def_df['y'] - (y_low + N/2))**2)
                 distance_ballcarrier_from_point = np.sqrt((ball_df['x'] - (x_low + N/2))**2 + (ball_df['y'] - (y_low + N/2))**2)
-                ret = pd.DataFrame({'grid_id': [f"{x_low} {y_low}"],
-                                                    'off_density': [current_offensive_player_density],
-                                                    'def_density': [current_defensive_player_density],
-                                                    'ballcarrier_density': [current_ballcarrier_player_density],
-                                                    'off_velocity_mean': [np.mean(velocities_offensive_toward_point)],
-                                                    'off_velocity_sum': [np.sum(velocities_offensive_toward_point)],
-                                                    'off_velocity_std': [np.std(velocities_offensive_toward_point)],
-                                                    'def_velocity_mean': [np.mean(velocities_defensive_toward_point)],
-                                                    'def_velocity_sum': [np.sum(velocities_defensive_toward_point)],
-                                                    'def_velocity_std': [np.std(velocities_defensive_toward_point)],
-                                                    'ballcarrier_velocity': [velocities_ballcarrier_toward_point.values[0]],
-                                                    'off_acc_mean': [np.mean(acceleration_offensive_toward_point)],
-                                                    'off_acc_sum': [np.sum(acceleration_offensive_toward_point)],
-                                                    'off_acc_std': [np.std(acceleration_offensive_toward_point)],
-                                                    'def_acc_mean': [np.mean(acceleration_defensive_toward_point)],
-                                                    'def_acc_sum': [np.sum(acceleration_defensive_toward_point)],
-                                                    'def_acc_std': [np.std(acceleration_defensive_toward_point)],
-                                                    'ballcarrier_acc': [acceleration_ballcarrier_toward_point.values[0]],
-                                                    'off_distance_mean': [np.mean(distance_offense_from_point)],
-                                                    'off_distance_sum': [np.sum(distance_offense_from_point)],
-                                                    'off_distance_std': [np.std(distance_offense_from_point)],
-                                                    'def_distance_mean': [np.mean(distance_defensive_from_point)],
-                                                    'def_distance_sum': [np.sum(distance_defensive_from_point)],
-                                                    'def_distance_std': [np.std(distance_defensive_from_point)],
-                                                    'ballcarrier_distance': [distance_ballcarrier_from_point.values[0]]})
+
+
+                # Calculate x,y differences from point
+                dx_off, dy_off = off_df['x'] - (x_low + (N/2)), off_df['y'] - (y_low + (N/2))
+                dx_def, dy_def = def_df['x'] - (x_low + (N/2)), def_df['y'] - (y_low + (N/2))
+                dx_bc, dy_bc = ball_df['x'] - (x_low + (N/2)), ball_df['y'] - (y_low + (N/2))
+
+                # Calculate dot product of change and Sx, Sy, Ax, Ay
+                speed_dot_off = off_df['Sx']*dx_off + off_df['Sy']*dy_off
+                speed_dot_def = def_df['Sx']*dx_def + def_df['Sy']*dy_def
+                speed_dot_bc = ball_df['Sx']*dx_bc + ball_df['Sy']*dy_bc
+                acc_dot_off = off_df['Ax']*dx_off + off_df['Ay']*dy_off
+                acc_dot_def = def_df['Ax']*dx_def + def_df['Ay']*dy_def
+                acc_dot_bc = ball_df['Ax']*dx_bc + ball_df['Ay']*dy_bc
+
+                # Velocity toward grid point 
+                off_velocity_toward_grid = [x if not math.isnan(x) else 0 for x in speed_dot_off / off_df['s']]
+                def_velocity_toward_grid = [x if not math.isnan(x) else 0 for x in speed_dot_def / def_df['s']]
+                ballcarrier_velocity_toward_grid = [x if not math.isnan(x) else 0 for x in speed_dot_bc / ball_df['s']]
+
+                # Acceleration toward grid point
+                off_acc_toward_grid = [x if not math.isnan(x) else 0 for x in acc_dot_off / off_df['a']]
+                def_acc_toward_grid = [x if not math.isnan(x) else 0 for x in acc_dot_def / def_df['a']]
+                ballcarrier_acc_toward_grid = [x if not math.isnan(x) else 0 for x in acc_dot_bc / ball_df['a']]
+
+                # Weighted 
+                off_weight_vel_by_dis_point = off_velocity_toward_grid*(1/distance_offense_from_point)
+                def_weight_vel_by_dis_point = def_velocity_toward_grid*(1/distance_defense_from_point)
+                off_weight_vel_by_dis_point_ball = off_weight_vel_by_dis_point*(1/distance_offense_from_ballcarrier)
+                def_weight_vel_by_dis_point_ball = def_weight_vel_by_dis_point*(1/distance_defense_from_ballcarrier)
+                ball_weight_vel_by_dis_point = ballcarrier_velocity_toward_grid*(1/distance_ballcarrier_from_point)
+                
+                off_weight_acc_by_dis_point = off_acc_toward_grid*(1/distance_offense_from_point)
+                def_weight_acc_by_dis_point = def_acc_toward_grid*(1/distance_defense_from_point)
+                off_weight_acc_by_dis_point_ball = off_weight_acc_by_dis_point*(1/distance_offense_from_ballcarrier)
+                def_weight_acc_by_dis_point_ball = def_weight_acc_by_dis_point*(1/distance_defense_from_ballcarrier)
+                ball_weight_acc_by_dis_point = ballcarrier_acc_toward_grid*(1/distance_ballcarrier_from_point)
+
+                off_weights = off_subset['weight']
+                def_weights = def_subset['weight']
+                ball_weights = ball_subset['weight']
+                
+                ret = pd.DataFrame({'x': x_low+(N/2), 'y' : y_low+(N/2),
+                                    "weighted_off_grid" : [np.sum(off_weights)],
+                                                    "weighted_def_grid" : [np.sum(def_weights)],
+                                                    'off_weight_vel_by_dis_point': [np.sum(off_weight_vel_by_dis_point)],
+                                                    'def_weight_vel_by_dis_point': [np.sum(def_weight_vel_by_dis_point)],
+                                                    'ball_weight_vel_by_dis_point': [ball_weight_vel_by_dis_point.values[0]],
+                                                    'off_weight_vel_by_dis_point_ball': [np.sum(off_weight_vel_by_dis_point_ball)],
+                                                    'def_weight_vel_by_dis_point_ball': [np.sum(def_weight_vel_by_dis_point_ball)],
+                                                    'off_weight_acc_by_dis_point' : [np.sum(off_weight_acc_by_dis_point)],
+                                                    'def_weight_acc_by_dis_point' : [np.sum(def_weight_acc_by_dis_point)],
+                                                    'off_weight_acc_by_dis_point_ball': [np.sum(off_weight_acc_by_dis_point_ball)],
+                                                    'def_weight_acc_by_dis_point_ball' : [np.sum(def_weight_acc_by_dis_point_ball)],
+                                                    'ball_weight_acc_by_dis_point' : [ball_weight_acc_by_dis_point.values[0]]
+                                                    })
                 if matrix_form:
-                    return_mat[:, int(x_low/N), int(y_low/N)] = np.array(ret.drop(['grid_id'], axis = 1).iloc[0])
-                else:
+                    return_mat[:, int(x_low/N), int((54-y_low)/N)] = np.array(ret.drop(['x', 'y'], axis = 1).iloc[0]) # flipped so that (1,1) is bottom corner
+                if (not matrix_form) or (plot) :
                     grid_features = pd.concat([grid_features, ret])
+        if plot:
+            labels = ret.columns[2:].tolist()
+            fig, axs = plt.subplots(4, 3, figsize=(16, 16))
+            axs = axs.flatten()
+            for i in range(12):
+                image = return_mat[i, :, :].T
+                axs[i].imshow(image, cmap='Blues', interpolation='none')
+                axs[i].axis('off')  # Turn off the axis for each subplot
+                axs[i].set_title(labels[i])
+                axs[i].grid()             
+            plt.subplots_adjust(wspace=0.2, hspace=0.2)
+            plt.show()
         if matrix_form:
-            return return_mat
+            return return_mat 
         else:
             return grid_features
 
-    def get_all_grid_features(self, N):
-        all_features = {}
+    def get_all_grid_features_for_plot(self, N):
+        all_features = pd.DataFrame()
         for frame_id in range(1, self.num_frames):
-            all_features.update({frame_id : self.get_grid_features(frame_id = frame_id, N = N, matrix_form = True)})
+            grid_feat = self.get_grid_features(frame_id = frame_id, N = N, matrix_form = False)
+            grid_feat['frameId'] = frame_id
+            all_features = pd.concat([all_features, grid_feat], axis = 0)
         return(all_features)
     
     def predict_tackle_distribution(self, model):
