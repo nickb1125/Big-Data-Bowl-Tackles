@@ -59,7 +59,7 @@ class play:
     def get_grid_features(self, frame_id, N, matrix_form = True, plot = None):
         stratified_dfs = self.tracking_refined_stratified[frame_id]
         grid_features = pd.DataFrame()
-        return_mat = np.zeros((12, len(list(range(0, 120, N))), len(list(range(0, 54, N)))))
+        return_mat = np.zeros((16, len(list(range(0, 120, N))), len(list(range(0, 54, N)))))
         off_df = stratified_dfs["Offense"]
         def_df = stratified_dfs["Defense"]
         ball_df = stratified_dfs["Carrier"]
@@ -95,27 +95,27 @@ class play:
                 acc_dot_bc = ball_df['Ax']*dx_bc + ball_df['Ay']*dy_bc
 
                 # Velocity toward grid point 
-                off_velocity_toward_grid = [x if not math.isnan(x) else 0 for x in speed_dot_off / off_df['s']]
-                def_velocity_toward_grid = [x if not math.isnan(x) else 0 for x in speed_dot_def / def_df['s']]
-                ballcarrier_velocity_toward_grid = [x if not math.isnan(x) else 0 for x in speed_dot_bc / ball_df['s']]
+                off_velocity_toward_grid = speed_dot_off / (distance_offense_from_point+0.0001)
+                def_velocity_toward_grid = speed_dot_def / (distance_defense_from_point+0.0001)
+                ballcarrier_velocity_toward_grid = speed_dot_bc / (distance_ballcarrier_from_point+0.0001)
 
                 # Acceleration toward grid point
-                off_acc_toward_grid = [x if not math.isnan(x) else 0 for x in acc_dot_off / off_df['a']]
-                def_acc_toward_grid = [x if not math.isnan(x) else 0 for x in acc_dot_def / def_df['a']]
-                ballcarrier_acc_toward_grid = [x if not math.isnan(x) else 0 for x in acc_dot_bc / ball_df['a']]
+                off_acc_toward_grid = acc_dot_off / (distance_offense_from_point+0.0001)
+                def_acc_toward_grid = acc_dot_def / (distance_defense_from_point+0.0001)
+                ballcarrier_acc_toward_grid = acc_dot_bc / (distance_ballcarrier_from_point+0.0001)
 
                 # Weighted 
-                off_weight_vel_by_dis_point = off_velocity_toward_grid*(1/distance_offense_from_point)
-                def_weight_vel_by_dis_point = def_velocity_toward_grid*(1/distance_defense_from_point)
-                off_weight_vel_by_dis_point_ball = off_weight_vel_by_dis_point*(1/distance_offense_from_ballcarrier)
-                def_weight_vel_by_dis_point_ball = def_weight_vel_by_dis_point*(1/distance_defense_from_ballcarrier)
-                ball_weight_vel_by_dis_point = ballcarrier_velocity_toward_grid*(1/distance_ballcarrier_from_point)
+                off_weight_vel_by_dis_point = off_velocity_toward_grid*(1/distance_offense_from_point+0.0001)
+                def_weight_vel_by_dis_point = def_velocity_toward_grid*(1/distance_defense_from_point+0.0001)
+                off_weight_vel_by_dis_point_ball = off_weight_vel_by_dis_point*(1/distance_offense_from_ballcarrier+0.0001)
+                def_weight_vel_by_dis_point_ball = def_weight_vel_by_dis_point*(1/distance_defense_from_ballcarrier+0.0001)
+                ball_weight_vel_by_dis_point = ballcarrier_velocity_toward_grid*(1/distance_ballcarrier_from_point+0.0001)
                 
-                off_weight_acc_by_dis_point = off_acc_toward_grid*(1/distance_offense_from_point)
-                def_weight_acc_by_dis_point = def_acc_toward_grid*(1/distance_defense_from_point)
-                off_weight_acc_by_dis_point_ball = off_weight_acc_by_dis_point*(1/distance_offense_from_ballcarrier)
-                def_weight_acc_by_dis_point_ball = def_weight_acc_by_dis_point*(1/distance_defense_from_ballcarrier)
-                ball_weight_acc_by_dis_point = ballcarrier_acc_toward_grid*(1/distance_ballcarrier_from_point)
+                off_weight_acc_by_dis_point = off_acc_toward_grid*(1/distance_offense_from_point+0.0001)
+                def_weight_acc_by_dis_point = def_acc_toward_grid*(1/distance_defense_from_point+0.0001)
+                off_weight_acc_by_dis_point_ball = off_weight_acc_by_dis_point*(1/distance_offense_from_ballcarrier+0.0001)
+                def_weight_acc_by_dis_point_ball = def_weight_acc_by_dis_point*(1/distance_defense_from_ballcarrier+0.0001)
+                ball_weight_acc_by_dis_point = ballcarrier_acc_toward_grid*(1/distance_ballcarrier_from_point+0.0001)
 
                 off_weights = off_subset['weight']
                 def_weights = def_subset['weight']
@@ -125,12 +125,16 @@ class play:
                                     "weighted_off_grid" : [np.sum(off_weights)],
                                                     "weighted_def_grid" : [np.sum(def_weights)],
                                                     'off_weight_vel_by_dis_point': [np.sum(off_weight_vel_by_dis_point)],
+                                                    'off_weight_vel_by_dis_point_sd': [np.std(off_weight_vel_by_dis_point)],
                                                     'def_weight_vel_by_dis_point': [np.sum(def_weight_vel_by_dis_point)],
+                                                    'def_weight_vel_by_dis_point_sd': [np.std(def_weight_vel_by_dis_point)],
                                                     'ball_weight_vel_by_dis_point': [ball_weight_vel_by_dis_point.values[0]],
                                                     'off_weight_vel_by_dis_point_ball': [np.sum(off_weight_vel_by_dis_point_ball)],
                                                     'def_weight_vel_by_dis_point_ball': [np.sum(def_weight_vel_by_dis_point_ball)],
                                                     'off_weight_acc_by_dis_point' : [np.sum(off_weight_acc_by_dis_point)],
+                                                    'off_weight_sd_by_dis_point_sd' : [np.std(off_weight_acc_by_dis_point)],
                                                     'def_weight_acc_by_dis_point' : [np.sum(def_weight_acc_by_dis_point)],
+                                                    'def_weight_sd_by_dis_point_sd' : [np.std(def_weight_acc_by_dis_point)],
                                                     'off_weight_acc_by_dis_point_ball': [np.sum(off_weight_acc_by_dis_point_ball)],
                                                     'def_weight_acc_by_dis_point_ball' : [np.sum(def_weight_acc_by_dis_point_ball)],
                                                     'ball_weight_acc_by_dis_point' : [ball_weight_acc_by_dis_point.values[0]]
@@ -141,9 +145,9 @@ class play:
                     grid_features = pd.concat([grid_features, ret])
         if plot:
             labels = ret.columns[2:].tolist()
-            fig, axs = plt.subplots(4, 3, figsize=(16, 16))
+            fig, axs = plt.subplots(4, 4, figsize=(16, 16))
             axs = axs.flatten()
-            for i in range(12):
+            for i in range(16):
                 image = return_mat[i, :, :].T
                 axs[i].imshow(image, cmap='Blues', interpolation='none')
                 axs[i].axis('off')  # Turn off the axis for each subplot
@@ -178,6 +182,24 @@ class play:
                     new_row = pd.DataFrame({"x" : [x*model.N+model.N/2], "y" : [y*model.N+model.N/2], "prob" : [output[0, x, y]], "frameId" : [frame_id]})
                     pred_df = pd.concat([pred_df, new_row], axis = 0)
         return(pred_df)
+
+
+class CustomLoss(nn.Module):
+    def __init__(self):
+        super(CustomLoss, self).__init__()
+
+    def forward(self, predicted_matrix, true_matrix):
+        # Find the index of the maximum predicted probability for each sample
+        _, predicted_indices = predicted_matrix.max(dim=1)
+
+        # Create one-hot encoded tensor from the predicted indices
+        predicted_one_hot = torch.zeros_like(predicted_matrix)
+        predicted_one_hot.scatter_(1, predicted_indices.unsqueeze(1), 1)
+
+        # Calculate the L1 distance between the predicted one-hot and true matrix
+        loss = nn.functional.l1_loss(predicted_one_hot, true_matrix)
+
+        return loss
                 
 
 
@@ -206,7 +228,7 @@ class TackleNet(nn.Module):
         self.conv2 = nn.Conv2d(20, 10, kernel_size=3, padding=1)
         self.conv3 = nn.Conv2d(10, 5, kernel_size=3, padding=1)
         self.conv4 = nn.Conv2d(5, 3, kernel_size=3, padding=1)
-        self.pool = nn.MaxPool2d(kernel_size = 3, stride=2)
+        self.pool = nn.MaxPool2d(kernel_size = 2, stride=2)
         
         # Fully connected layers
         self.fc1 = nn.Linear(math.ceil(120/N)*math.ceil(54/N)*3, 64)

@@ -15,6 +15,8 @@ import random
 from objects import euclidean_distance, play, TackleAttemptDataset, TackleNet, plot_predictions, play_cache
 import pickle
 
+random.seed(2)
+
 print("Loading base data")
 print("-----------------")
 
@@ -35,7 +37,7 @@ tackles = pd.read_csv("data/nfl-big-data-bowl-2024/tackles.csv")
 tracking = pd.concat([pd.read_csv(f"data/nfl-big-data-bowl-2024/tracking_week_{week}.csv") for week in range(1, 10)])
 ball_tracking = tracking.loc[tracking['nflId'].isna()][["gameId", "frameId", "playId", "x", "y"]].rename({"x" : "ball_x", "y" : "ball_y"}, axis = 1)
 
-N = 10
+N = 5
 print("Getting training and validation images....")
 print(f"(Using N = {N})")
 print("------------------------------------------")
@@ -51,11 +53,18 @@ for row in tqdm(plays.playId):
     if play_object.num_frames <= frame_id:
         continue # if not n frames happened
     if len(play_object.tracking_refined.get(1).type.unique()) != 4:
+        print("Below is lacking a type of position and is being omitted, check if desired...")
+        print(row)
         continue # if not offense, defense, ball and carrier in play
-    images.append(play_object.get_grid_features(frame_id = frame_id, N = N))
+    image = play_object.get_grid_features(frame_id = frame_id, N = N)
+    if np.isinf(image).any():
+        print("Below has infinity feature output and is being omitted, check if desired...")
+        print(row)
+        continue
+    images.append(image)
     labels.append(play_object.get_end_of_play_matrix(N = N))
 tackle_dataset = TackleAttemptDataset(images = images, labels = labels)
 
-with open("data/tackle_images.pkl", f'wb') as outp:  # Overwrites any existing file.
+with open("data/tackle_images_5.pkl", f'wb') as outp:  # Overwrites any existing file.
     pickle.dump(tackle_dataset, outp, pickle.HIGHEST_PROTOCOL)
 
