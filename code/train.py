@@ -12,7 +12,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 import random
-from objects import euclidean_distance, play, TackleAttemptDataset, TackleNet, plot_predictions, play_cache, CustomLoss
+from objects import euclidean_distance, play, TackleAttemptDataset, TackleNet, plot_predictions, CustomLoss
 import pickle
 
 random.seed(2)
@@ -31,11 +31,10 @@ for index in range(len(tackle_dataset.images)):
                 print(im)
                 print(i)
 
-
 train_data, val_data = torch.utils.data.random_split(tackle_dataset, [0.9, 0.1])
 
 # Create Data Loader
-train_dataloader = DataLoader(train_data, batch_size=128, shuffle=True)
+train_dataloader = DataLoader(train_data, batch_size=256, shuffle=True)
 val_loader = DataLoader(val_data, batch_size=64)
 
 # Define the loss function (you can choose an appropriate loss function for your task)
@@ -43,13 +42,13 @@ criterion = nn.BCELoss()
 # criterion = CustomLoss()
 
 # Create Model
-model = TackleNet(N = 5, nvar = 12)
+model = TackleNet(N = 5, nvar = 16)
 
 # Define the optimizer (e.g., Stochastic Gradient Descent)
 optimizer = optim.Adam(model.parameters(), lr=0.0005)
 
 # Training loop
-num_epochs = 50
+num_epochs = 6
 
 print("Training TackleNet...")
 print("---------------------")

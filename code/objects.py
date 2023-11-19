@@ -54,14 +54,35 @@ class play:
         current_positions['Sy'] = current_positions['s'] * np.sin(current_positions['dir_rad'])
         current_positions['Ax'] = current_positions['a'] * np.cos(current_positions['dir_rad'])
         current_positions['Ay'] = current_positions['a'] * np.sin(current_positions['dir_rad'])
+        current_positions['x'] = current_positions['x'].apply(lambda value: max(0, min(119.9, value)))
+        current_positions['y'] = current_positions['y'].apply(lambda value: max(0, min(53.9, value)))
         return current_positions[['nflId', 'x', 'y', 'Sx', 'Sy', 'Ax', 'Ay', 's', 'a', 'dis', 'o', 'dir', 'dir_rad', 'height', 'weight', 'type']]
 
-    def get_grid_features(self, frame_id, N, matrix_form = True, plot = None):
+    def get_grid_features_simple(self, frame_id, N):
+        return_mat = np.zeros((3, len(list(range(0, 120, N))), len(list(range(0, 54, N)))))
+        stratified_dfs = self.tracking_refined_stratified[frame_id]
+        off_df = stratified_dfs["Offense"]
+        def_df = stratified_dfs["Defense"]
+        ball_df = stratified_dfs["Carrier"]
+        for _, row in off_df.iterrows():
+            x, y = row['x'], row['y']
+            return_mat[0, int(x / N), int((54 - y) / N)] += 1
+        for _, row in def_df.iterrows():
+            x, y = row['x'], row['y']
+            return_mat[1, int(x / N), int((54 - y) / N)] += 1
+        for _, row in ball_df.iterrows():
+            x, y = row['x'], row['y']
+            return_mat[2, int(x / N), int((54 - y) / N)] += 1
+        return return_mat
+
+    def get_grid_features(self, frame_id, N, matrix_form = True, plot = None, without_player_id = 0):
         stratified_dfs = self.tracking_refined_stratified[frame_id]
         grid_features = pd.DataFrame()
         return_mat = np.zeros((16, len(list(range(0, 120, N))), len(list(range(0, 54, N)))))
         off_df = stratified_dfs["Offense"]
         def_df = stratified_dfs["Defense"]
+        if without_player_id != 0:
+            def_df = def_df.query("nflId != @without_player_id")
         ball_df = stratified_dfs["Carrier"]
         for x_low in list(range(0, 120, N)):
             for y_low in list(range(0, 54, N)):
@@ -224,29 +245,24 @@ class TackleNet(nn.Module):
         super(TackleNet, self).__init__()
         
         # Convolutional layers
-        self.conv1 = nn.Conv2d(nvar, 20, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv2d(20, 10, kernel_size=3, padding=1)
-        self.conv3 = nn.Conv2d(10, 5, kernel_size=3, padding=1)
-        self.conv4 = nn.Conv2d(5, 3, kernel_size=3, padding=1)
+        self.conv1 = nn.Conv2d(nvar, 50, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(50, 25, kernel_size=3, padding=1)
         self.pool = nn.MaxPool2d(kernel_size = 2, stride=2)
-        
+        self.dropout1 = nn.Dropout(0.2)
+
         # Fully connected layers
-        self.fc1 = nn.Linear(math.ceil(120/N)*math.ceil(54/N)*3, 64)
-        self.fc2 = nn.Linear(64, math.ceil(120/N)*math.ceil(54/N))
+        self.fc1 = nn.Linear(1500, math.ceil(120/N)*math.ceil(54/N))
         self.N = N
         
     def forward(self, x):
         # Input shape: (batch_size, 24, 12, 6)
         x = F.relu(self.conv1(x))
-        x = F.relu(self.conv2(x))
-        x = F.relu(self.conv3(x))
-        x = F.relu(self.conv4(x))
-        
+        x = self.pool(self.dropout1(F.relu(self.conv2(x))))      
         # Flatten the output for the fully connected layers
         x = x.view(x.size(0), -1)
-        
-        x = F.relu(self.fc1(x))
-        x = F.softmax(self.fc2(x), dim=1)
+        # print(x.shape)
+
+        x = F.softmax(self.fc1(x), dim=1)
         
         # Apply softmax to ensure the output sums to 1 along the channel dimension (12*6)
         x = x.view(-1, math.ceil(120/self.N), math.ceil(54/self.N))
@@ -277,19 +293,6 @@ def plot_predictions(prediction_output, true):
     # Adjust spacing between subplots to make them look better
     plt.subplots_adjust(wspace=0.2, hspace=0.2)
     plt.show()
-
-class play_cache:
-    def __init__(self, play_df):
-        self.plays_zip = list(zip(play_df.gameId, play_df.playId))
-        self.all_play = self.calculate_all_play_objects()
-
-    def calculate_all_play_objects(self):
-        print("Calculating all play_objects.")
-        print("-----------------------------")
-        all_plays = dict()
-        for game_id, play_id in tqdm(self.plays_zip):
-            all_plays[f"{game_id}_{play_id}"] = play(game_id, play_id)
-        return all_plays 
     
 def euclidean_distance(x1, y1, x2, y2):
     return np.sqrt((x1 - x2)**2 + (y1 - y2)**2)
