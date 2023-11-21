@@ -17,7 +17,7 @@ import pickle
 
 random.seed(2)
 
-with open('data/tackle_images_5.pkl', 'rb') as f:
+with open('data/tackle_images_10_output_5.pkl', 'rb') as f:
     tackle_dataset = pickle.load(f)
 
 for index in range(len(tackle_dataset.images)):
@@ -48,7 +48,7 @@ model = TackleNet(N = 5, nvar = 16)
 optimizer = optim.Adam(model.parameters(), lr=0.0005)
 
 # Training loop
-num_epochs = 6
+num_epochs = 5
 
 print("Training TackleNet...")
 print("---------------------")

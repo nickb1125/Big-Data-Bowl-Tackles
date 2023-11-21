@@ -84,15 +84,16 @@ class play:
         if without_player_id != 0:
             def_df = def_df.query("nflId != @without_player_id")
         ball_df = stratified_dfs["Carrier"]
+        current_x = int(ball_df.x.values[0])
         for x_low in list(range(0, 120, N)):
             for y_low in list(range(0, 54, N)):
-                x_high = x_low + N
-                y_high = y_low + N
+                x_high, x_mid = x_low + N, x_low + (N/2)
+                y_high, y_mid = y_low + N, y_low + (N/2)
 
                 # Extract relevant subsets of data
-                off_subset = off_df[(off_df['x'] >= x_low) & (off_df['x'] < x_high) & (off_df['y'] >= y_low) & (off_df['y'] < y_high)]
-                def_subset = def_df[(def_df['x'] >= x_low) & (def_df['x'] < x_high) & (def_df['y'] >= y_low) & (def_df['y'] < y_high)]
-                ball_subset = ball_df[(ball_df['x'] >= x_low) & (ball_df['x'] < x_high) & (ball_df['y'] >= y_low) & (ball_df['y'] < y_high)]
+                off_subset = off_df.loc[(off_df['x'] >= x_low) & (off_df['x'] < x_high) & (off_df['y'] >= y_low) & (off_df['y'] < y_high)]
+                def_subset = def_df.loc[(def_df['x'] >= x_low) & (def_df['x'] < x_high) & (def_df['y'] >= y_low) & (def_df['y'] < y_high)]
+                ball_subset = ball_df.loc[(ball_df['x'] >= x_low) & (ball_df['x'] < x_high) & (ball_df['y'] >= y_low) & (ball_df['y'] < y_high)]
 
                 # Distance
                 distance_offense_from_ballcarrier = np.sqrt((off_df['x'] - ball_df['x'].values[0])**2 + (off_df['y'] - ball_df['y'].values[0])**2)
@@ -103,9 +104,9 @@ class play:
 
 
                 # Calculate x,y differences from point
-                dx_off, dy_off = off_df['x'] - (x_low + (N/2)), off_df['y'] - (y_low + (N/2))
-                dx_def, dy_def = def_df['x'] - (x_low + (N/2)), def_df['y'] - (y_low + (N/2))
-                dx_bc, dy_bc = ball_df['x'] - (x_low + (N/2)), ball_df['y'] - (y_low + (N/2))
+                dx_off, dy_off = off_df['x'] - x_mid, off_df['y'] - y_mid
+                dx_def, dy_def = def_df['x'] - x_mid, def_df['y'] - y_mid
+                dx_bc, dy_bc = ball_df['x'] - x_mid, ball_df['y'] - y_mid
 
                 # Calculate dot product of change and Sx, Sy, Ax, Ay
                 speed_dot_off = off_df['Sx']*dx_off + off_df['Sy']*dy_off
@@ -140,9 +141,17 @@ class play:
 
                 off_weights = off_subset['weight']
                 def_weights = def_subset['weight']
-                ball_weights = ball_subset['weight']
                 
-                ret = pd.DataFrame({'x': x_low+(N/2), 'y' : y_low+(N/2),
+                if matrix_form:
+                    ret = [np.sum(off_weights), np.sum(def_weights), np.sum(off_weight_vel_by_dis_point),
+                           np.std(off_weight_vel_by_dis_point), np.sum(def_weight_vel_by_dis_point), np.std(def_weight_vel_by_dis_point),
+                           ball_weight_vel_by_dis_point.values[0], np.sum(off_weight_vel_by_dis_point_ball), np.sum(def_weight_vel_by_dis_point_ball),
+                           np.sum(off_weight_acc_by_dis_point), np.std(off_weight_acc_by_dis_point), np.sum(def_weight_acc_by_dis_point),
+                           np.std(def_weight_acc_by_dis_point), np.sum(off_weight_acc_by_dis_point_ball), np.sum(def_weight_acc_by_dis_point_ball),
+                           ball_weight_acc_by_dis_point.values[0]]
+                    return_mat[:, int(x_low/N), int((54-y_low)/N)] = ret # flipped so that (1,1) is bottom corner
+                if (not matrix_form) or (plot) :
+                    ret = pd.DataFrame({'x': x_low+(N/2), 'y' : y_low+(N/2),
                                     "weighted_off_grid" : [np.sum(off_weights)],
                                                     "weighted_def_grid" : [np.sum(def_weights)],
                                                     'off_weight_vel_by_dis_point': [np.sum(off_weight_vel_by_dis_point)],
@@ -160,9 +169,6 @@ class play:
                                                     'def_weight_acc_by_dis_point_ball' : [np.sum(def_weight_acc_by_dis_point_ball)],
                                                     'ball_weight_acc_by_dis_point' : [ball_weight_acc_by_dis_point.values[0]]
                                                     })
-                if matrix_form:
-                    return_mat[:, int(x_low/N), int((54-y_low)/N)] = np.array(ret.drop(['x', 'y'], axis = 1).iloc[0]) # flipped so that (1,1) is bottom corner
-                if (not matrix_form) or (plot) :
                     grid_features = pd.concat([grid_features, ret])
         if plot:
             labels = ret.columns[2:].tolist()
@@ -226,7 +232,9 @@ class CustomLoss(nn.Module):
 
 class TackleAttemptDataset:
 
-    def __init__(self, images, labels):
+    def __init__(self, images, labels, play_ids, frame_ids):
+        self.playIds = play_ids
+        self.frameIds = frame_ids
         self.images = images
         self.labels = labels
         self.num_samples = len(images)
@@ -246,18 +254,18 @@ class TackleNet(nn.Module):
         
         # Convolutional layers
         self.conv1 = nn.Conv2d(nvar, 50, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv2d(50, 25, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(50, 100, kernel_size=3, padding=1)
         self.pool = nn.MaxPool2d(kernel_size = 2, stride=2)
         self.dropout1 = nn.Dropout(0.2)
 
         # Fully connected layers
-        self.fc1 = nn.Linear(1500, math.ceil(120/N)*math.ceil(54/N))
+        self.fc1 = nn.Linear(7200, math.ceil(120/N)*math.ceil(54/N))
         self.N = N
         
     def forward(self, x):
         # Input shape: (batch_size, 24, 12, 6)
         x = F.relu(self.conv1(x))
-        x = self.pool(self.dropout1(F.relu(self.conv2(x))))      
+        x = F.relu(self.conv2(x))
         # Flatten the output for the fully connected layers
         x = x.view(x.size(0), -1)
         # print(x.shape)
