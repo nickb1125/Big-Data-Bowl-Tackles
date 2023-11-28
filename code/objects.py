@@ -34,12 +34,12 @@ class play:
     def get_end_of_play_matrix(self, N):
         tackles_attempt_mat = np.zeros((int(120/N), math.ceil(54/N)))
         for item in list(zip(self.eop.eop_x, self.eop.eop_y)):
-            if item[0] > 120:
+            if item[0] >= 120:
                 item = list(item)
-                item[0] = 120
-            if item[1] > 54:
+                item[0] = 119
+            if item[1] >= 54:
                 item = list(item)
-                item[1] = 54
+                item[1] = 53
             tackles_attempt_mat[int(item[0]/N), int(item[1]/N)] = 1
         return tackles_attempt_mat
     
@@ -75,7 +75,7 @@ class play:
             return_mat[2, int(x / N), int((54 - y) / N)] += 1
         return return_mat
 
-    def get_grid_features(self, frame_id, N, matrix_form = True, plot = None, without_player_id = 0):
+    def get_grid_features(self, frame_id, N, matrix_form = True, plot = None, distance_limit=20,  without_player_id = 0):
         stratified_dfs = self.tracking_refined_stratified[frame_id]
         grid_features = pd.DataFrame()
         return_mat = np.zeros((16, len(list(range(0, 120, N))), len(list(range(0, 54, N)))))
@@ -90,58 +90,84 @@ class play:
                 x_high, x_mid = x_low + N, x_low + (N/2)
                 y_high, y_mid = y_low + N, y_low + (N/2)
 
-                # Extract relevant subsets of data
-                off_subset = off_df.loc[(off_df['x'] >= x_low) & (off_df['x'] < x_high) & (off_df['y'] >= y_low) & (off_df['y'] < y_high)]
-                def_subset = def_df.loc[(def_df['x'] >= x_low) & (def_df['x'] < x_high) & (def_df['y'] >= y_low) & (def_df['y'] < y_high)]
-                ball_subset = ball_df.loc[(ball_df['x'] >= x_low) & (ball_df['x'] < x_high) & (ball_df['y'] >= y_low) & (ball_df['y'] < y_high)]
-
                 # Distance
-                distance_offense_from_ballcarrier = np.sqrt((off_df['x'] - ball_df['x'].values[0])**2 + (off_df['y'] - ball_df['y'].values[0])**2)
-                distance_defense_from_ballcarrier = np.sqrt((def_df['x'] - ball_df['x'].values[0])**2 + (def_df['y'] - ball_df['y'].values[0])**2)
                 distance_offense_from_point = np.sqrt((off_df['x'] - (x_low + N/2))**2 + (off_df['y'] - (y_low + N/2))**2)
                 distance_defense_from_point = np.sqrt((def_df['x'] - (x_low + N/2))**2 + (def_df['y'] - (y_low + N/2))**2)
                 distance_ballcarrier_from_point = np.sqrt((ball_df['x'] - (x_low + N/2))**2 + (ball_df['y'] - (y_low + N/2))**2)
-
-
-                # Calculate x,y differences from point
-                dx_off, dy_off = off_df['x'] - x_mid, off_df['y'] - y_mid
-                dx_def, dy_def = def_df['x'] - x_mid, def_df['y'] - y_mid
-                dx_bc, dy_bc = ball_df['x'] - x_mid, ball_df['y'] - y_mid
-
-                # Calculate dot product of change and Sx, Sy, Ax, Ay
-                speed_dot_off = off_df['Sx']*dx_off + off_df['Sy']*dy_off
-                speed_dot_def = def_df['Sx']*dx_def + def_df['Sy']*dy_def
-                speed_dot_bc = ball_df['Sx']*dx_bc + ball_df['Sy']*dy_bc
-                acc_dot_off = off_df['Ax']*dx_off + off_df['Ay']*dy_off
-                acc_dot_def = def_df['Ax']*dx_def + def_df['Ay']*dy_def
-                acc_dot_bc = ball_df['Ax']*dx_bc + ball_df['Ay']*dy_bc
-
-                # Velocity toward grid point 
-                off_velocity_toward_grid = speed_dot_off / (distance_offense_from_point+0.0001)
-                def_velocity_toward_grid = speed_dot_def / (distance_defense_from_point+0.0001)
-                ballcarrier_velocity_toward_grid = speed_dot_bc / (distance_ballcarrier_from_point+0.0001)
-
-                # Acceleration toward grid point
-                off_acc_toward_grid = acc_dot_off / (distance_offense_from_point+0.0001)
-                def_acc_toward_grid = acc_dot_def / (distance_defense_from_point+0.0001)
-                ballcarrier_acc_toward_grid = acc_dot_bc / (distance_ballcarrier_from_point+0.0001)
-
-                # Weighted 
-                off_weight_vel_by_dis_point = off_velocity_toward_grid*(1/distance_offense_from_point+0.0001)
-                def_weight_vel_by_dis_point = def_velocity_toward_grid*(1/distance_defense_from_point+0.0001)
-                off_weight_vel_by_dis_point_ball = off_weight_vel_by_dis_point*(1/distance_offense_from_ballcarrier+0.0001)
-                def_weight_vel_by_dis_point_ball = def_weight_vel_by_dis_point*(1/distance_defense_from_ballcarrier+0.0001)
-                ball_weight_vel_by_dis_point = ballcarrier_velocity_toward_grid*(1/distance_ballcarrier_from_point+0.0001)
-                
-                off_weight_acc_by_dis_point = off_acc_toward_grid*(1/distance_offense_from_point+0.0001)
-                def_weight_acc_by_dis_point = def_acc_toward_grid*(1/distance_defense_from_point+0.0001)
-                off_weight_acc_by_dis_point_ball = off_weight_acc_by_dis_point*(1/distance_offense_from_ballcarrier+0.0001)
-                def_weight_acc_by_dis_point_ball = def_weight_acc_by_dis_point*(1/distance_defense_from_ballcarrier+0.0001)
-                ball_weight_acc_by_dis_point = ballcarrier_acc_toward_grid*(1/distance_ballcarrier_from_point+0.0001)
-
-                off_weights = off_subset['weight']
-                def_weights = def_subset['weight']
-                
+                # print(f"Offense: {min(distance_offense_from_point)}, Defense: {min(distance_defense_from_point)}, Ball: {min(distance_ballcarrier_from_point)}")
+                if (min(distance_offense_from_point) < distance_limit):
+                    distance_offense_from_ballcarrier = np.sqrt((off_df['x'] - ball_df['x'].values[0])**2 + (off_df['y'] - ball_df['y'].values[0])**2)
+                    off_subset = off_df.loc[(off_df['x'] >= x_low) & (off_df['x'] < x_high) & (off_df['y'] >= y_low) & (off_df['y'] < y_high)]
+                    dx_off, dy_off = off_df['x'] - x_mid, off_df['y'] - y_mid
+                    speed_dot_off = off_df['Sx']*dx_off + off_df['Sy']*dy_off
+                    acc_dot_off = off_df['Ax']*dx_off + off_df['Ay']*dy_off
+                    off_velocity_toward_grid = speed_dot_off / (distance_offense_from_point+0.0001)
+                    off_acc_toward_grid = acc_dot_off / (distance_offense_from_point+0.0001)
+                    off_weight_vel_by_dis_point = off_velocity_toward_grid*(1/distance_offense_from_point+0.0001)
+                    off_weight_vel_by_dis_point_ball = off_weight_vel_by_dis_point*(1/distance_offense_from_ballcarrier+0.0001)
+                    off_weight_acc_by_dis_point = off_acc_toward_grid*(1/distance_offense_from_point+0.0001)
+                    off_weight_acc_by_dis_point_ball = off_weight_acc_by_dis_point*(1/distance_offense_from_ballcarrier+0.0001)
+                    off_weights = off_subset['weight']
+                else:
+                    distance_offense_from_ballcarrier = pd.Series(0)
+                    off_subset = pd.Series(0)
+                    dx_off, dy_off = pd.Series(0),pd.Series(0)
+                    speed_dot_off = pd.Series(0)
+                    acc_dot_off = pd.Series(0)
+                    off_velocity_toward_grid = pd.Series(0)
+                    off_acc_toward_grid = pd.Series(0)
+                    off_weight_vel_by_dis_point = pd.Series(0)
+                    off_weight_vel_by_dis_point_ball = pd.Series(0)
+                    off_weight_acc_by_dis_point = pd.Series(0)
+                    off_weight_acc_by_dis_point_ball = pd.Series(0)
+                    off_weights = pd.Series(0)
+                if (min(distance_defense_from_point) < distance_limit):
+                    distance_defense_from_ballcarrier = np.sqrt((def_df['x'] - ball_df['x'].values[0])**2 + (def_df['y'] - ball_df['y'].values[0])**2)
+                    def_subset = def_df.loc[(def_df['x'] >= x_low) & (def_df['x'] < x_high) & (def_df['y'] >= y_low) & (def_df['y'] < y_high)]
+                    dx_def, dy_def = def_df['x'] - x_mid, def_df['y'] - y_mid
+                    speed_dot_def = def_df['Sx']*dx_def + def_df['Sy']*dy_def
+                    acc_dot_def = def_df['Ax']*dx_def + def_df['Ay']*dy_def
+                    def_velocity_toward_grid = speed_dot_def / (distance_defense_from_point+0.0001)
+                    def_acc_toward_grid = acc_dot_def / (distance_defense_from_point+0.0001)
+                    def_weight_vel_by_dis_point = def_velocity_toward_grid*(1/distance_defense_from_point+0.0001)
+                    def_weight_vel_by_dis_point_ball = def_weight_vel_by_dis_point*(1/distance_defense_from_ballcarrier+0.0001)
+                    def_weight_acc_by_dis_point = def_acc_toward_grid*(1/distance_defense_from_point+0.0001)
+                    def_weight_acc_by_dis_point_ball = def_weight_acc_by_dis_point*(1/distance_defense_from_ballcarrier+0.0001)
+                    def_weights = def_subset['weight']
+                else:
+                    distance_defense_from_ballcarrier = pd.Series(0)
+                    def_subset = pd.Series(0)
+                    dx_def, dy_def = pd.Series(0), pd.Series(0)
+                    speed_dot_def = pd.Series(0)
+                    acc_dot_def = pd.Series(0)
+                    def_velocity_toward_grid = pd.Series(0)
+                    def_acc_toward_grid = pd.Series(0)
+                    def_weight_vel_by_dis_point = pd.Series(0)
+                    def_weight_vel_by_dis_point_ball = pd.Series(0)
+                    def_weight_acc_by_dis_point = pd.Series(0)
+                    def_weight_acc_by_dis_point_ball = pd.Series(0)
+                    def_weights = pd.Series(0)
+                if (min(distance_ballcarrier_from_point) < distance_limit):
+                    # Calculate x,y differences from point
+                    dx_bc, dy_bc = ball_df['x'] - x_mid, ball_df['y'] - y_mid
+                    # Calculate dot product of change and Sx, Sy, Ax, Ay
+                    speed_dot_bc = ball_df['Sx']*dx_bc + ball_df['Sy']*dy_bc
+                    acc_dot_bc = ball_df['Ax']*dx_bc + ball_df['Ay']*dy_bc
+                    # Velocity toward grid point 
+                    ballcarrier_velocity_toward_grid = speed_dot_bc / (distance_ballcarrier_from_point+0.0001)
+                    # Acceleration toward grid point
+                    ballcarrier_acc_toward_grid = acc_dot_bc / (distance_ballcarrier_from_point+0.0001)
+                    # Weighted 
+                    ball_weight_vel_by_dis_point = ballcarrier_velocity_toward_grid*(1/distance_ballcarrier_from_point+0.0001)
+                    ball_weight_acc_by_dis_point = ballcarrier_acc_toward_grid*(1/distance_ballcarrier_from_point+0.0001)
+                else:
+                    dx_bc, dy_bc = pd.Series(0),pd.Series(0)
+                    speed_dot_bc = pd.Series(0)
+                    acc_dot_bc = pd.Series(0)
+                    ballcarrier_velocity_toward_grid = pd.Series(0)
+                    ballcarrier_acc_toward_grid = pd.Series(0)
+                    ball_weight_vel_by_dis_point = pd.Series(0)
+                    ball_weight_acc_by_dis_point = pd.Series(0)
                 if matrix_form:
                     ret = [np.sum(off_weights), np.sum(def_weights), np.sum(off_weight_vel_by_dis_point),
                            np.std(off_weight_vel_by_dis_point), np.sum(def_weight_vel_by_dis_point), np.std(def_weight_vel_by_dis_point),
@@ -268,6 +294,35 @@ class TackleNet(nn.Module):
         x = F.relu(self.conv2(x))
         # Flatten the output for the fully connected layers
         x = x.view(x.size(0), -1)
+        print(x.shape)
+
+        x = F.softmax(self.fc1(x), dim=1)
+        
+        # Apply softmax to ensure the output sums to 1 along the channel dimension (12*6)
+        x = x.view(-1, math.ceil(120/self.N), math.ceil(54/self.N))
+        
+        return x
+    
+class TackleNet2(nn.Module):
+    def __init__(self, N, nvar):
+        super(TackleNet2, self).__init__()
+        
+        # Convolutional layers
+        self.conv1 = nn.Conv2d(nvar, 50, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(50, 100, kernel_size=3, padding=1)
+        self.pool = nn.MaxPool2d(kernel_size = 2, stride=2)
+        self.dropout1 = nn.Dropout(0.2)
+
+        # Fully connected layers
+        self.fc1 = nn.Linear(1200, math.ceil(120/N)*math.ceil(54/N))
+        self.N = N
+        
+    def forward(self, x):
+        # Input shape: (batch_size, 24, 12, 6)
+        x = self.pool(F.relu(self.conv1(x)))
+        x = self.pool(F.relu(self.conv2(x)))
+        # Flatten the output for the fully connected layers
+        x = x.view(x.size(0), -1)
         # print(x.shape)
 
         x = F.softmax(self.fc1(x), dim=1)
@@ -304,5 +359,16 @@ def plot_predictions(prediction_output, true):
     
 def euclidean_distance(x1, y1, x2, y2):
     return np.sqrt((x1 - x2)**2 + (y1 - y2)**2)
+
+class TackleNetEnsemble:
+
+    def __init__(self, models):
+        self.models = models
+    
+    def predict_pdf(image):
+        pass
+        # np.array()
+        # for model in models:
+        #     pred = model(image)
 
 

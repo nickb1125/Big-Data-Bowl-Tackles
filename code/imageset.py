@@ -32,48 +32,50 @@ plays = pd.read_csv("data/nfl-big-data-bowl-2024/plays.csv")
 tackles = pd.read_csv("data/nfl-big-data-bowl-2024/tackles.csv")
 
 # Read and combine tracking data for all weeks
-tracking = pd.concat([pd.read_csv(f"data/nfl-big-data-bowl-2024/tracking_a_week_{week}.csv") for week in range(1, 10)])
+tracking = pd.concat([pd.read_csv(f"data/nfl-big-data-bowl-2024/tracking_no_aug_week_{week}.csv") for week in range(1, 10)])
 ball_tracking = tracking.loc[tracking['nflId'].isna()][["gameId", "frameId", "playId", "x", "y"]].rename({"x" : "ball_x", "y" : "ball_y"}, axis = 1)
 
-N = 10
+load_test = False
+distance_limit=1000
+N = 5
 test_games = tracking.query("week == 9").gameId.unique()
 test_plays = plays.query("gameId in @test_games")
 train_val_games = tracking.query("week != 9").gameId.unique()
 train_val_plays = plays.query("gameId in @train_val_games")
 
+if load_test:
+    print("Getting test images (all frames)....")
+    print(f"(Using N = {N})")
+    print("------------------------------------------")
 
-print("Getting test images (all frames)....")
-print(f"(Using N = {N})")
-print("------------------------------------------")
+    images = []
+    labels = []
+    play_ids = []
+    frame_ids = []
+    for row in tqdm(range(test_plays.shape[0])):
+        play_row = test_plays.iloc[row,]
+        play_object = play(play_row.gameId, play_row.playId, plays, tracking, ball_tracking, tackles, players)
+        frame_id = random.randint(1, play_object.num_frames)
+        # for frame_id in range(1, play_object.num_frames):
+        play_ids.append(play_row.playId)
+        frame_ids.append(frame_id)
+        if play_object.num_frames <= frame_id:
+            continue # if not n frames happened
+        if len(play_object.tracking_refined.get(1).type.unique()) != 4:
+            print("Below is lacking a type of position and is being omitted, check if desired...")
+            print(row)
+            continue # if not offense, defense, ball and carrier in play
+        image = play_object.get_grid_features(frame_id = frame_id, N = N, distance_limit=distance_limit)
+        if np.isinf(image).any():
+            print("Below has infinity feature output and is being omitted, check if desired...")
+            print(row)
+            continue
+        images.append(image)
+        labels.append(play_object.get_end_of_play_matrix(N = N))
+    tackle_dataset = TackleAttemptDataset(images = images, labels = labels, play_ids = play_ids, frame_ids = frame_ids)
 
-images = []
-labels = []
-play_ids = []
-frame_ids = []
-for row in tqdm(range(test_plays.shape[0])):
-    play_row = test_plays.iloc[row,]
-    play_object = play(play_row.gameId, play_row.playId, plays, tracking, ball_tracking, tackles, players)
-    frame_id = random.randint(1, play_object.num_frames)
-    # for frame_id in range(1, play_object.num_frames):
-    play_ids.append(play_row.playId)
-    frame_ids.append(frame_id)
-    if play_object.num_frames <= frame_id:
-        continue # if not n frames happened
-    if len(play_object.tracking_refined.get(1).type.unique()) != 4:
-        print("Below is lacking a type of position and is being omitted, check if desired...")
-        print(row)
-        continue # if not offense, defense, ball and carrier in play
-    image = play_object.get_grid_features(frame_id = frame_id, N = N)
-    if np.isinf(image).any():
-        print("Below has infinity feature output and is being omitted, check if desired...")
-        print(row)
-        continue
-    images.append(image)
-    labels.append(play_object.get_end_of_play_matrix(N = 5))
-tackle_dataset = TackleAttemptDataset(images = images, labels = labels, play_ids = play_ids, frame_ids = frame_ids)
-
-with open("data/tackle_images_10_output_5_test.pkl", f'wb') as outp:  # Overwrites any existing file.
-    pickle.dump(tackle_dataset, outp, pickle.HIGHEST_PROTOCOL)
+    with open("data/tackle_images_10_output_5_test.pkl", f'wb') as outp:  # Overwrites any existing file.
+        pickle.dump(tackle_dataset, outp, pickle.HIGHEST_PROTOCOL)
 
 print("Getting training and validation images....")
 print(f"(Using N = {N})")
@@ -83,7 +85,7 @@ images = []
 labels = []
 play_ids = []
 frame_ids = []
-for bag in range(5):
+for bag in range(1):
     print(f"COMPLETING BAG {bag}....")
     # Choose random frame from each play
     images = []
@@ -100,16 +102,16 @@ for bag in range(5):
             print("Below is lacking a type of position and is being omitted, check if desired...")
             print(row)
             continue # if not offense, defense, ball and carrier in play
-        image = play_object.get_grid_features(frame_id = frame_id, N = N)
+        image = play_object.get_grid_features(frame_id = frame_id, N = N, distance_limit=distance_limit)
         if np.isinf(image).any():
             print("Below has infinity feature output and is being omitted, check if desired...")
             print(row)
             continue
         images.append(image)
-        labels.append(play_object.get_end_of_play_matrix(N = 5))
+        labels.append(play_object.get_end_of_play_matrix(N = N))
     tackle_dataset = TackleAttemptDataset(images = images, labels = labels, play_ids = play_ids, frame_ids = frame_ids)
 
-    with open(f"data/tackle_images_10_output_5_bag_{bag}.pkl", f'wb') as outp:  # Overwrites any existing file.
+    with open(f"data/tackle_images_5_output_5_bag_{bag}_dis_filter_1000.pkl", f'wb') as outp:  # Overwrites any existing file.
         pickle.dump(tackle_dataset, outp, pickle.HIGHEST_PROTOCOL)
 
 
