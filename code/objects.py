@@ -13,21 +13,50 @@ from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 import random
 
+def get_player_movement_features(player_df, N):
+    x_mat = np.tile(np.arange(0, 120, N)+(N/2), (math.ceil(54/N), 1))
+    y_mat = np.transpose(np.tile(np.arange(0, 54, N)+(N/2), (math.ceil(120/N), 1)))
+    distance_mat = np.zeros((player_df.shape[0], x_mat.shape[0], x_mat.shape[1]))
+    once_weighted_velocity_mat = np.zeros((player_df.shape[0], x_mat.shape[0], x_mat.shape[1]))
+    once_weighted_acceleration_mat = np.zeros((player_df.shape[0], x_mat.shape[0], x_mat.shape[1]))
+    i = 0
+    for index, row in player_df.iterrows():
+        x_dist = x_mat - row.x
+        y_dist = y_mat - row.y
+        distance = np.sqrt((x_dist)**2 + (y_dist)**2)
+        velocity_toward_grid = (row.Sx*x_dist + row.Sy*y_dist) / (distance+0.0001)
+        acc_toward_grid = (row.Ax*x_dist + row.Ay*y_dist) / (distance+0.0001)
+        weight_vel_by_dis_point_ball = velocity_toward_grid*(1/(distance+0.0001))
+        weight_acc_by_dis_point_ball = acc_toward_grid*(1/(distance+0.0001))
+        once_weighted_velocity_mat[i, :, :] = weight_vel_by_dis_point_ball
+        once_weighted_acceleration_mat[i, :, :] = weight_acc_by_dis_point_ball
+        distance_mat[i, :, :] = distance
+        i += 1
+    return {'distance' : distance_mat, 'field_weighted_velocity': once_weighted_velocity_mat, 'field_weighted_acc' : once_weighted_acceleration_mat}
+
+def get_player_field_densities(player_df, N):
+    density_mat = np.zeros((len(list(range(0, 54, N))), len(list(range(0, 120, N)))))
+    x_mat = np.tile(np.arange(0, 120, N)+(N/2), (math.ceil(54/N), 1))
+    y_mat = np.transpose(np.tile(np.arange(0, 54, N)+(N/2), (math.ceil(120/N), 1)))
+    for index, row in player_df.iterrows():
+        x_rounded = math.floor(row.x / N)
+        y_rounded = math.floor(row.y / N)
+        try:
+            density_mat[y_rounded, x_rounded] += 1
+        except:
+            print(y_rounded)
+            print(x_rounded)
+            raise ValueError
+    return density_mat
+
 class play:
-    def __init__(self, game_id, play_id, plays, tracking, ball_tracking, tackles, players):
-        self.players = players
-        self.play = plays.query("gameId == @game_id & playId ==  @play_id")
-        self.ball_carry_id = self.play.ballCarrierId.reset_index(drop =1)[0]
+    def __init__(self, game_id, play_id, tracking):
         self.tracking_df = tracking.query("gameId == @game_id & playId ==  @play_id")
-        self.ball_track = ball_tracking.query("gameId == @game_id & playId ==  @play_id")
-        self.tackle_oppurtunities = tackles.query("gameId == @game_id & playId ==  @play_id")
+        self.ball_carry_id = self.tracking_df.ballCarrierId.reset_index(drop =1)[0]
         self.min_frame = min(self.tracking_df.frameId)
         self.num_frames = max(self.tracking_df.frameId)
         self.eop = self.get_end_of_play_location()
-        self.tracking_refined = {frame_id : self.refine_tracking(frame_id = frame_id) for frame_id in range(1, self.num_frames)}
-        self.tracking_refined_stratified = {frame_id : {player_type : self.tracking_refined.get(frame_id).loc[(self.tracking_refined.get(frame_id)['type'] == player_type)] 
-                                                        for player_type in ["Offense", "Defense", "Carrier"]} for frame_id in range(1, self.num_frames)}
-    
+
     def get_end_of_play_location(self):
         end_of_play_carrier = self.tracking_df.query("nflId == @self.ball_carry_id & frameId == @self.num_frames")
         return end_of_play_carrier[["frameId", "x", "y"]].rename({"x" : "eop_x", "y" : "eop_y"}, axis = 1)
@@ -45,23 +74,16 @@ class play:
         return tackles_attempt_mat
     
     def refine_tracking(self, frame_id):
-        current_positions = self.tracking_df.query("frameId == @frame_id").merge(self.players, on = "nflId", how = "left")
-        current_positions['type'] = current_positions['position'].apply(
-            lambda x: "Offense" if x in ["QB", "TE", "WR", "G", "OLB", "RB", "C", "FB"] else "Defense")
-        current_positions['type'] = current_positions.apply(lambda row: 'Ball' if pd.isna(row['nflId']) else row['type'], axis=1)
-        current_positions.loc[current_positions.nflId == self.ball_carry_id, 'type'] = "Carrier"
-        current_positions['dir_rad'] = np.radians(current_positions['dir']) # fix degrees
-        current_positions['Sx'] = current_positions['s'] * np.cos(current_positions['dir_rad'])
-        current_positions['Sy'] = current_positions['s'] * np.sin(current_positions['dir_rad'])
-        current_positions['Ax'] = current_positions['a'] * np.cos(current_positions['dir_rad'])
-        current_positions['Ay'] = current_positions['a'] * np.sin(current_positions['dir_rad'])
-        current_positions['x'] = current_positions['x'].apply(lambda value: max(0, min(119.9, value)))
-        current_positions['y'] = current_positions['y'].apply(lambda value: max(0, min(53.9, value)))
-        return current_positions[['nflId', 'x', 'y', 'Sx', 'Sy', 'Ax', 'Ay', 's', 'a', 'dis', 'o', 'dir', 'dir_rad', 'height', 'weight', 'type']]
+        this_frame = self.tracking_df.query("frameId == @frame_id")
+        non_dict = this_frame[['nflId', 'x', 'y', 'Sx', 'Sy', 'Ax', 'Ay', 's', 'a', 'dis', 'o', 'dir', 'dir_rad', 'weight', 'type']]
+        if len(non_dict.type.unique()) != 4:
+            raise ValueError("Not does not account all player types")
+        return {player_type : non_dict.loc[(non_dict['type'] == player_type)] 
+                for player_type in ["Offense", "Defense", "Carrier"]}
 
     def get_grid_features_simple(self, frame_id, N):
         return_mat = np.zeros((3, len(list(range(0, 120, N))), len(list(range(0, 54, N)))))
-        stratified_dfs = self.tracking_refined_stratified[frame_id]
+        stratified_dfs = self.refine_tracking(frame_id = frame_id)
         off_df = stratified_dfs["Offense"]
         def_df = stratified_dfs["Defense"]
         ball_df = stratified_dfs["Carrier"]
@@ -76,106 +98,58 @@ class play:
             return_mat[2, int(x / N), int((54 - y) / N)] += 1
         return return_mat
 
-    def get_grid_features(self, frame_id, N, matrix_form = True, plot = None, without_player_id = 0):
-        stratified_dfs = self.tracking_refined_stratified[frame_id]
-        grid_features = pd.DataFrame()
-        return_mat = np.zeros((12, len(list(range(0, 120, N))), len(list(range(0, 54, N)))))
+    def get_grid_features(self, frame_id, N, plot = False, without_player_id = 0):
+        stratified_dfs = self.refine_tracking(frame_id = frame_id)
         off_df = stratified_dfs["Offense"]
         def_df = stratified_dfs["Defense"]
+        ball_df = stratified_dfs["Carrier"]
         if without_player_id != 0:
             def_df = def_df.query("nflId != @without_player_id")
-        ball_df = stratified_dfs["Carrier"]
-        current_x = int(ball_df.x.values[0])
-        for x_low in list(range(0, 120, N)):
-            for y_low in list(range(0, 54, N)):
-                x_high, x_mid = x_low + N, x_low + (N/2)
-                y_high, y_mid = y_low + N, y_low + (N/2)
 
-                # Distance
-                distance_offense_from_point = np.sqrt((off_df['x'] - (x_low + N/2))**2 + (off_df['y'] - (y_low + N/2))**2)
-                distance_defense_from_point = np.sqrt((def_df['x'] - (x_low + N/2))**2 + (def_df['y'] - (y_low + N/2))**2)
-                distance_ballcarrier_from_point = np.sqrt((ball_df['x'] - (x_low + N/2))**2 + (ball_df['y'] - (y_low + N/2))**2)
-                
-                # Offense
-                distance_offense_from_ballcarrier = np.sqrt((off_df['x'] - ball_df['x'].values[0])**2 + (off_df['y'] - ball_df['y'].values[0])**2)
-                off_subset = off_df.loc[(off_df['x'] >= x_low) & (off_df['x'] < x_high) & (off_df['y'] >= y_low) & (off_df['y'] < y_high)]
-                dx_off, dy_off = off_df['x'] - x_mid, off_df['y'] - y_mid
-                speed_dot_off = off_df['Sx']*dx_off + off_df['Sy']*dy_off
-                acc_dot_off = off_df['Ax']*dx_off + off_df['Ay']*dy_off
-                off_velocity_toward_grid = speed_dot_off / (distance_offense_from_point+0.0001)
-                off_acc_toward_grid = acc_dot_off / (distance_offense_from_point+0.0001)
-                off_weight_vel_by_dis_point_ball = off_velocity_toward_grid*(1/distance_offense_from_point+0.0001)*(1/distance_offense_from_ballcarrier+0.0001)
-                off_weight_acc_by_dis_point_ball = off_acc_toward_grid*(1/distance_offense_from_point+0.0001)*(1/distance_offense_from_ballcarrier+0.0001)
-                off_weights = off_subset['weight']
-                
-                # Defense
-                distance_defense_from_ballcarrier = np.sqrt((def_df['x'] - ball_df['x'].values[0])**2 + (def_df['y'] - ball_df['y'].values[0])**2)
-                def_subset = def_df.loc[(def_df['x'] >= x_low) & (def_df['x'] < x_high) & (def_df['y'] >= y_low) & (def_df['y'] < y_high)]
-                dx_def, dy_def = def_df['x'] - x_mid, def_df['y'] - y_mid
-                speed_dot_def = def_df['Sx']*dx_def + def_df['Sy']*dy_def
-                acc_dot_def = def_df['Ax']*dx_def + def_df['Ay']*dy_def
-                def_velocity_toward_grid = speed_dot_def / (distance_defense_from_point+0.0001)
-                def_acc_toward_grid = acc_dot_def / (distance_defense_from_point+0.0001)
-                def_weight_vel_by_dis_point_ball = def_velocity_toward_grid*(1/distance_defense_from_point+0.0001)*(1/distance_defense_from_ballcarrier+0.0001)
-                def_weight_acc_by_dis_point_ball = def_acc_toward_grid*(1/distance_defense_from_point+0.0001)*(1/distance_defense_from_ballcarrier+0.0001)
-                def_weights = def_subset['weight']
+        distance_offense_from_ballcarrier = np.sqrt((off_df['x'] - ball_df['x'].values[0])**2 + (off_df['y'] - ball_df['y'].values[0])**2)
+        distance_defense_from_ballcarrier = np.sqrt((def_df['x'] - ball_df['x'].values[0])**2 + (def_df['y'] - ball_df['y'].values[0])**2)
 
-                # Ball
-                # Calculate x,y differences from point
-                dx_bc, dy_bc = ball_df['x'] - x_mid, ball_df['y'] - y_mid
-                # Calculate dot product of change and Sx, Sy, Ax, Ay
-                speed_dot_bc = ball_df['Sx']*dx_bc + ball_df['Sy']*dy_bc
-                acc_dot_bc = ball_df['Ax']*dx_bc + ball_df['Ay']*dy_bc
-                # Velocity toward grid point 
-                ballcarrier_velocity_toward_grid = speed_dot_bc / (distance_ballcarrier_from_point+0.0001)
-                # Acceleration toward grid point
-                ballcarrier_acc_toward_grid = acc_dot_bc / (distance_ballcarrier_from_point+0.0001)
-                # Weighted 
-                ball_weight_vel_by_dis_point = ballcarrier_velocity_toward_grid*(1/distance_ballcarrier_from_point+0.0001)
-                ball_weight_acc_by_dis_point = ballcarrier_acc_toward_grid*(1/distance_ballcarrier_from_point+0.0001)
+        off_movement_features = get_player_movement_features(off_df, N)
+        off_acc_mat = off_movement_features['field_weighted_acc']
+        off_vel_mat = off_movement_features['field_weighted_velocity']
+        off_acc_mat_weight = np.array(distance_offense_from_ballcarrier)[:, np.newaxis, np.newaxis] * off_acc_mat
+        off_vel_mat_weight = np.array(distance_offense_from_ballcarrier)[:, np.newaxis, np.newaxis] * off_vel_mat
 
-                if matrix_form:
-                    ret = [np.sum(off_weights), np.sum(def_weights), 
-                           ball_weight_vel_by_dis_point.values[0], ball_weight_acc_by_dis_point.values[0],
-                           np.sum(off_weight_vel_by_dis_point_ball), np.std(off_weight_vel_by_dis_point_ball),
-                           np.sum(off_weight_acc_by_dis_point_ball), np.std(off_weight_acc_by_dis_point_ball), 
-                           np.sum(def_weight_vel_by_dis_point_ball), np.std(def_weight_vel_by_dis_point_ball),
-                           np.sum(def_weight_acc_by_dis_point_ball), np.std(def_weight_acc_by_dis_point_ball)
-                           ]
-                    return_mat[:, int(x_low/N), int((54-y_low)/N)] = ret # flipped so that (1,1) is bottom corner
-                if (not matrix_form) or (plot):
-                    ret = pd.DataFrame({'x': x_low+(N/2), 'y' : y_low+(N/2),
-                                    "weighted_off_grid" : [np.sum(off_weights)],
-                                                    "weighted_def_grid" : [np.sum(def_weights)],
-                                                    'ball_weight_vel_by_dis_point': [ball_weight_vel_by_dis_point.values[0]],
-                                                    'ball_weight_acc_by_dis_point' : [ball_weight_acc_by_dis_point.values[0]],
-                                                    'off_weight_vel_by_dis_point_ball': [np.sum(off_weight_vel_by_dis_point_ball)],
-                                                    'off_weight_vel_by_dis_point_ball_sd': [np.std(off_weight_vel_by_dis_point_ball)],
-                                                    'off_weight_acc_by_dis_point_ball': [np.sum(off_weight_acc_by_dis_point_ball)],
-                                                    'off_weight_acc_by_dis_point_ball_sd': [np.std(off_weight_acc_by_dis_point_ball)],
-                                                    'def_weight_vel_by_dis_point_ball': [np.sum(def_weight_vel_by_dis_point_ball)],
-                                                    'def_weight_vel_by_dis_point_ball_sd': [np.std(def_weight_vel_by_dis_point_ball)],
-                                                    'def_weight_acc_by_dis_point_ball': [np.sum(def_weight_acc_by_dis_point_ball)],
-                                                    'def_weight_acc_by_dis_point_ball_sd': [np.std(def_weight_acc_by_dis_point_ball)]
-                                                    })
-                    grid_features = pd.concat([grid_features, ret])
-        if plot:
-            labels = ret.columns[2:].tolist()
-            fig, axs = plt.subplots(3, 4, figsize=(16, 16))
-            axs = axs.flatten()
-            for i in range(12):
-                image = return_mat[i, :, :].T
-                axs[i].imshow(image, cmap='Blues', interpolation='none')
-                axs[i].axis('off')  # Turn off the axis for each subplot
-                axs[i].set_title(labels[i])
-                axs[i].grid()             
-            plt.subplots_adjust(wspace=0.2, hspace=0.2)
-            plt.show()
-            return
-        if matrix_form:
-            return return_mat 
+        def_movement_features = get_player_movement_features(def_df, N)
+        def_acc_mat = def_movement_features['field_weighted_acc']
+        def_vel_mat = def_movement_features['field_weighted_velocity']
+        def_acc_mat_weight = np.array(distance_defense_from_ballcarrier)[:, np.newaxis, np.newaxis] * def_acc_mat
+        def_vel_mat_weight = np.array(distance_defense_from_ballcarrier)[:, np.newaxis, np.newaxis] * def_vel_mat
+
+        ball_movement_features = get_player_movement_features(ball_df, N)
+        ball_acc_mat = ball_movement_features['field_weighted_acc']
+        ball_vel_mat = ball_movement_features['field_weighted_velocity']
+
+        off_density = get_player_field_densities(off_df, N)
+        def_density = get_player_field_densities(def_df, N)
+
+        ret = np.stack([off_density, def_density, 
+                np.sum(ball_vel_mat, axis = 0), np.sum(ball_acc_mat, axis = 0),
+                np.sum(off_vel_mat, axis = 0), 
+                np.sum(off_acc_mat, axis = 0), 
+                np.sum(def_vel_mat, axis = 0), 
+                np.sum(def_acc_mat, axis = 0),
+                np.sum(off_vel_mat_weight, axis = 0), 
+                np.sum(off_acc_mat_weight, axis = 0), 
+                np.sum(def_vel_mat_weight, axis = 0), 
+                np.sum(def_acc_mat_weight, axis = 0)
+                ])
+        if not plot:
+            return ret
         else:
-            return grid_features
+            fig, axes = plt.subplots(nrows=3, ncols=4, figsize=(10, 10))
+            for i, ax in enumerate(axes.flat):
+                ax.imshow(ret[i, :, :], cmap='viridis')
+                ax.set_title(f'Dimension {i + 1}')
+
+            # Adjust layout for better visualization
+            plt.tight_layout()
+            plt.show()
 
     def get_all_grid_features_for_plot(self, N):
         all_features = pd.DataFrame()
@@ -243,27 +217,28 @@ class TackleNet(nn.Module):
         super(TackleNet, self).__init__()
         
         # Convolutional layers
-        self.conv1 = nn.Conv2d(nvar, 50, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv2d(50, 100, kernel_size=3, padding=1)
-        self.pool = nn.MaxPool2d(kernel_size = 2, stride=2)
+        self.conv1 = nn.Conv2d(nvar, 5, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(5, 1, kernel_size=3, padding=1)
+        self.pool1 = nn.MaxPool2d(kernel_size = 2, stride=1)
+        self.pool2 = nn.MaxPool2d(kernel_size = 2, stride=1)
         self.dropout1 = nn.Dropout(0.2)
 
         # Fully connected layers
-        self.fc1 = nn.Linear(7200, 5*math.ceil(120/N)*math.ceil(54/N))
+        self.fc1 = nn.Linear(6136, 1024)
+        self.fc2 = nn.Linear(1024, math.ceil(120/N)*math.ceil(54/N))
         self.N = N
         
     def forward(self, x):
-        # Input shape: (batch_size, 24, 12, 6)
-        x = F.relu(self.conv1(x))
-        x = F.relu(self.conv2(x))
+        x = self.pool1(F.relu(self.conv1(self.dropout1(x))))
+        x = self.pool2(F.relu(self.conv2(x)))
         # Flatten the output for the fully connected layers
         x = x.view(x.size(0), -1)
         # print(x.shape)
 
-        x = F.softmax(self.fc1(x), dim=1)
+        x = F.softmax(self.fc2(self.fc1(x)), dim=1)
         
         # Apply softmax to ensure the output sums to 1 along the channel dimension (12*6)
-        x = x.view(-1, 5, math.ceil(120/self.N), math.ceil(54/self.N))
+        x = x.view(-1, math.ceil(120/self.N), math.ceil(54/self.N))
         
         return x
     
@@ -287,7 +262,7 @@ def plot_predictions(prediction_output, true):
             for l in range(y_max):
                 # axs[i].text(l, k, f'{image[k, l]:.1f}', ha='center', va='center', color='black')
                 if true_image[k, l] == 1:
-                    axs[i].plot(l, k, 'ro', markersize=5, color='blue')               
+                    axs[i].plot(l, k, 'ro', markersize=0.5, color='blue')               
     # Adjust spacing between subplots to make them look better
     plt.subplots_adjust(wspace=0.2, hspace=0.2)
     plt.show()
