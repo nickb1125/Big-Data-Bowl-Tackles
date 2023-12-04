@@ -12,7 +12,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 import random
-from objects import euclidean_distance, play, TackleAttemptDataset, TackleNet, plot_predictions, CustomLoss, TackleNet2
+from objects import euclidean_distance, play, TackleAttemptDataset, TackleNet, plot_predictions, CustomLoss
 import pickle
 
 if False:
@@ -133,7 +133,7 @@ if False:
 
 
 for bag in range(1):
-    with open(f'data/tackle_images_5_output_5_bag_{bag}_dis_filter_10.pkl', 'rb') as f:
+    with open(f'data/tackle_images_10_output_10_bag_{bag}_stratified.pkl', 'rb') as f:
         tackle_dataset = pickle.load(f)
 
     for index in range(len(tackle_dataset.images)):
@@ -164,7 +164,7 @@ for bag in range(1):
     # criterion = CustomLoss()
 
     # Create Model
-    model = TackleNet2(N = 5, nvar = 16)
+    model = TackleNet(N = 10, nvar = 19)
 
     # Define the optimizer (e.g., Stochastic Gradient Descent)
     optimizer = optim.Adam(model.parameters(), lr=0.001)
