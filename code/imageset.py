@@ -86,12 +86,12 @@ for bag in range(10):
         try:
             image = play_object.get_grid_features(frame_id = frame_id, N = N)
         except ValueError:
-            print("Below is lacking a type of position and is being omitted, check if desired...")
-            print(row)
+            # print("Below is lacking a type of position and is being omitted, check if desired...")
+            # print(row)
             continue # if not offense, defense, ball and carrier in play
         if np.isinf(image).any():
-            print("Below has infinity feature output and is being omitted, check if desired...")
-            print(row)
+            # print("Below has infinity feature output and is being omitted, check if desired...")
+            # print(row)
             continue
         images.append(image)
         labels.append(play_object.get_end_of_play_matrix(N = N))

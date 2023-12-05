@@ -14,42 +14,6 @@ from sklearn.model_selection import train_test_split
 import random
 import pickle
 
-def get_player_movement_features(player_df, N):
-    x_mat = np.tile(np.arange(0, 120, N)+(N/2), (math.ceil(54/N), 1))
-    y_mat = np.transpose(np.tile(np.arange(0, 54, N)+(N/2), (math.ceil(120/N), 1)))
-    distance_mat = np.zeros((player_df.shape[0], x_mat.shape[0], x_mat.shape[1]))
-    once_weighted_velocity_mat = np.zeros((player_df.shape[0], x_mat.shape[0], x_mat.shape[1]))
-    once_weighted_acceleration_mat = np.zeros((player_df.shape[0], x_mat.shape[0], x_mat.shape[1]))
-    i = 0
-    for index, row in player_df.iterrows():
-        x_dist = x_mat - row.x
-        y_dist = y_mat - row.y
-        distance = np.sqrt((x_dist)**2 + (y_dist)**2)
-        velocity_toward_grid = (row.Sx*x_dist + row.Sy*y_dist) / (distance+0.0001)
-        acc_toward_grid = (row.Ax*x_dist + row.Ay*y_dist) / (distance+0.0001)
-        weight_vel_by_dis_point_ball = velocity_toward_grid*(1/(distance+0.0001))
-        weight_acc_by_dis_point_ball = acc_toward_grid*(1/(distance+0.0001))
-        once_weighted_velocity_mat[i, :, :] = weight_vel_by_dis_point_ball
-        once_weighted_acceleration_mat[i, :, :] = weight_acc_by_dis_point_ball
-        distance_mat[i, :, :] = distance
-        i += 1
-    return {'distance' : distance_mat, 'field_weighted_velocity': once_weighted_velocity_mat, 'field_weighted_acc' : once_weighted_acceleration_mat}
-
-def get_player_field_densities(player_df, N):
-    density_mat = np.zeros((len(list(range(0, 54, N))), len(list(range(0, 120, N)))))
-    x_mat = np.tile(np.arange(0, 120, N)+(N/2), (math.ceil(54/N), 1))
-    y_mat = np.transpose(np.tile(np.arange(0, 54, N)+(N/2), (math.ceil(120/N), 1)))
-    for index, row in player_df.iterrows():
-        x_rounded = math.floor(row.x / N)
-        y_rounded = math.floor(row.y / N)
-        try:
-            density_mat[y_rounded, x_rounded] += 1
-        except:
-            print(y_rounded)
-            print(x_rounded)
-            raise ValueError
-    return density_mat
-
 class play:
     def __init__(self, game_id, play_id, tracking):
         self.tracking_df = tracking.query("gameId == @game_id & playId ==  @play_id")
@@ -81,23 +45,6 @@ class play:
             raise ValueError("Not does not account all player types")
         return {player_type : non_dict.loc[(non_dict['type'] == player_type)] 
                 for player_type in ["Offense", "Defense", "Carrier"]}
-
-    def get_grid_features_simple(self, frame_id, N):
-        return_mat = np.zeros((3, len(list(range(0, 120, N))), len(list(range(0, 54, N)))))
-        stratified_dfs = self.refine_tracking(frame_id = frame_id)
-        off_df = stratified_dfs["Offense"]
-        def_df = stratified_dfs["Defense"]
-        ball_df = stratified_dfs["Carrier"]
-        for _, row in off_df.iterrows():
-            x, y = row['x'], row['y']
-            return_mat[0, int(x / N), int((54 - y) / N)] += 1
-        for _, row in def_df.iterrows():
-            x, y = row['x'], row['y']
-            return_mat[1, int(x / N), int((54 - y) / N)] += 1
-        for _, row in ball_df.iterrows():
-            x, y = row['x'], row['y']
-            return_mat[2, int(x / N), int((54 - y) / N)] += 1
-        return return_mat
 
     def get_grid_features(self, frame_id, N, plot = False, without_player_id = 0):
         stratified_dfs = self.refine_tracking(frame_id = frame_id)
@@ -156,38 +103,44 @@ class play:
             all_features = pd.concat([all_features, grid_feat], axis = 0)
         return(all_features)
     
-    def predict_tackle_distribution(self, model):
-        if len(self.tracking_refined.get(1).type.unique()) != 4:
-            raise KeyError("None-Complete Tracking Data") # if not offense, defense, ball and carrier in play
-        outputs = []
-        pred_df = pd.DataFrame()
-        for frame_id in range(1, self.num_frames):
-            image = self.get_grid_features(frame_id = frame_id, N = model.N)
-            image = image[None, :, :, :]
-            output = model(torch.FloatTensor(image)).detach().numpy()
-            for x in range(output.shape[1]):
-                for y in range(output.shape[2]):
-                    new_row = pd.DataFrame({"x" : [x*model.N+model.N/2], "y" : [y*model.N+model.N/2], "prob" : [output[0, x, y]], "frameId" : [frame_id]})
-                    pred_df = pd.concat([pred_df, new_row], axis = 0)
-        return(pred_df)
+    def predict_tackle_distribution(self, model, without_player_id = 0, to_df = True):
+        pred_list = []
+        batch_images = torch.FloatTensor(np.array([
+            self.get_grid_features(frame_id=i, N=model.N, without_player_id=without_player_id)
+            for i in range(self.min_frame, self.num_frames+1)]))
+        outputs = model.predict_pdf(batch_images).detach().numpy()
+        if to_df:
+            ret = array_to_field_dataframe(input_array=outputs, N=model.N)
+            ret['frameId'] = ret['frameId']+self.min_frame
+            return ret
+        return outputs
+    
+    def get_contribution_matricies(self, model, to_df = True):
+        original = self.predict_tackle_distribution(model=model, without_player_id = 0, to_df = False)
+        # Predict ommissions
+        def_df = self.refine_tracking(frame_id = self.min_frame)["Defense"]
+        def_ids = def_df.nflId.unique()
+        contribution_dict = dict()
+        contribution_list = []
+        for id in tqdm(def_ids):
+            w_omission = self.predict_tackle_distribution(model = model, without_player_id = id, to_df = False).numpy()
+            contribution_mat = original-w_omission
+            if to_df:
+                contribution_df = array_to_field_dataframe(input_array=contribution_mat, N=model.N) 
+                contribution_df['frameId'] = contribution_df['frameId']+self.min_frame+1
+                contribution_df['nflId'] = id
+                contribution_list.append(contribution_df)
+                continue
+            contribution_dict.update({id : contribution_mat})
+        if to_df:
+            return pd.concat(contribution_list, axis = 0)
+        return contribution_dict
 
 
-class CustomLoss(nn.Module):
-    def __init__(self):
-        super(CustomLoss, self).__init__()
+        
 
-    def forward(self, predicted_matrix, true_matrix):
-        # Find the index of the maximum predicted probability for each sample
-        _, predicted_indices = predicted_matrix.max(dim=1)
-
-        # Create one-hot encoded tensor from the predicted indices
-        predicted_one_hot = torch.zeros_like(predicted_matrix)
-        predicted_one_hot.scatter_(1, predicted_indices.unsqueeze(1), 1)
-
-        # Calculate the L1 distance between the predicted one-hot and true matrix
-        loss = nn.functional.l1_loss(predicted_one_hot, true_matrix)
-
-        return loss
+        original = self.predict_tackle_distribution(model = model)
+        original['omit'] = 0
                 
 
 
@@ -235,6 +188,42 @@ class TackleNet(nn.Module):
         
         return x
     
+def get_player_movement_features(player_df, N):
+    x_mat = np.tile(np.arange(0, 120, N)+(N/2), (math.ceil(54/N), 1))
+    y_mat = np.transpose(np.tile(np.arange(0, 54, N)+(N/2), (math.ceil(120/N), 1)))
+    distance_mat = np.zeros((player_df.shape[0], x_mat.shape[0], x_mat.shape[1]))
+    once_weighted_velocity_mat = np.zeros((player_df.shape[0], x_mat.shape[0], x_mat.shape[1]))
+    once_weighted_acceleration_mat = np.zeros((player_df.shape[0], x_mat.shape[0], x_mat.shape[1]))
+    i = 0
+    for index, row in player_df.iterrows():
+        x_dist = x_mat - row.x
+        y_dist = y_mat - row.y
+        distance = np.sqrt((x_dist)**2 + (y_dist)**2)
+        velocity_toward_grid = (row.Sx*x_dist + row.Sy*y_dist) / (distance+0.0001)
+        acc_toward_grid = (row.Ax*x_dist + row.Ay*y_dist) / (distance+0.0001)
+        weight_vel_by_dis_point_ball = velocity_toward_grid*(1/(distance+0.0001))
+        weight_acc_by_dis_point_ball = acc_toward_grid*(1/(distance+0.0001))
+        once_weighted_velocity_mat[i, :, :] = weight_vel_by_dis_point_ball
+        once_weighted_acceleration_mat[i, :, :] = weight_acc_by_dis_point_ball
+        distance_mat[i, :, :] = distance
+        i += 1
+    return {'distance' : distance_mat, 'field_weighted_velocity': once_weighted_velocity_mat, 'field_weighted_acc' : once_weighted_acceleration_mat}
+
+def get_player_field_densities(player_df, N):
+    density_mat = np.zeros((len(list(range(0, 54, N))), len(list(range(0, 120, N)))))
+    x_mat = np.tile(np.arange(0, 120, N)+(N/2), (math.ceil(54/N), 1))
+    y_mat = np.transpose(np.tile(np.arange(0, 54, N)+(N/2), (math.ceil(120/N), 1)))
+    for index, row in player_df.iterrows():
+        x_rounded = math.floor(row.x / N)
+        y_rounded = math.floor(row.y / N)
+        try:
+            density_mat[y_rounded, x_rounded] += 1
+        except:
+            print(y_rounded)
+            print(x_rounded)
+            raise ValueError
+    return density_mat
+    
 def plot_predictions(prediction_output, true):
     fig, axs = plt.subplots(8, 8, figsize=(16, 16))
 
@@ -261,8 +250,8 @@ def plot_predictions(prediction_output, true):
     plt.show()
 
 class TackleNetEnsemble:
-
-    def __init__(self, num_models):
+    def __init__(self, num_models, N = 5):
+        self.N = N
         self.models = dict()
         self.num_models = num_models
         for mod_num in range(num_models):
@@ -279,6 +268,16 @@ class TackleNetEnsemble:
         preds = torch.stack(preds)
         overall_pred = torch.mean(preds, axis = 0)
         return overall_pred
+    
+def array_to_field_dataframe(input_array, N):
+    pred_list=[]
+    for frame_id in range(input_array.shape[0]):
+        for x in range(input_array.shape[1]):
+            for y in range(input_array.shape[2]):
+                new_row = pd.DataFrame({"x" : [x*N+N/2], "y" : [y*N+N/2], "prob" : [input_array[frame_id, x, y]], "frameId" : [frame_id]})
+                pred_list.append(new_row)
+    pred_df = pd.concat(pred_list, axis = 0)
+    return pred_df
         
 
 

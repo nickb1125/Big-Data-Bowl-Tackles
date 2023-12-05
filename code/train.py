@@ -12,7 +12,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 import random
-from objects import play, TackleAttemptDataset, TackleNet, plot_predictions, CustomLoss, TackleNetEnsemble
+from objects import play, TackleAttemptDataset, TackleNet, plot_predictions, TackleNetEnsemble
 import pickle
 
 with open(f'data/tackle_images_5_output_5_test.pkl', 'rb') as f:
@@ -146,7 +146,7 @@ for bag in range(10):
         pickle.dump(model, outp, pickle.HIGHEST_PROTOCOL)
 
 ### Final ensemble on test
-ensemble_model = TackleNetEnsemble(num_models=10)
+ensemble_model = TackleNetEnsemble(num_models=10, N = 5)
 predictions = []
 true_labels = []
 exact_correct = []
