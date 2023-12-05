@@ -12,7 +12,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 import random
-from objects import euclidean_distance, play, TackleAttemptDataset, TackleNet, plot_predictions
+from objects import play, TackleAttemptDataset, TackleNet, plot_predictions
 import pickle
 
 print("Loading base data")
@@ -25,8 +25,8 @@ tracking = pd.concat([pd.read_csv(f"data/nfl-big-data-bowl-2024/tracking_a_week_
  # Filter to only tracking plays meeting criteria
 plays = tracking[['gameId', 'playId']].drop_duplicates().merge(plays, how = 'left', on = ['gameId', 'playId'])
 
-load_test = False
-N = 1
+load_test = True
+N = 5
 test_games = tracking.query("week == 9").gameId.unique()
 test_plays = plays.query("(gameId in @test_games)")
 train_val_games = tracking.query("week != 9").gameId.unique()
@@ -43,26 +43,25 @@ if load_test:
     frame_ids = []
     for row in tqdm(range(test_plays.shape[0])):
         play_row = test_plays.iloc[row,]
-        play_object = play(play_row.gameId, play_row.playId, plays, tracking, ball_tracking, tackles, players)
-        frame_id = random.randint(1, play_object.num_frames)
-        # for frame_id in range(1, play_object.num_frames):
+        play_object = play(play_row.gameId, play_row.playId, tracking)
+        frame_id = random.randint(play_object.min_frame, play_object.num_frames)
         play_ids.append(play_row.playId)
         frame_ids.append(frame_id)
         try:
             image = play_object.get_grid_features(frame_id = frame_id, N = N)
         except ValueError:
-            print("Below is lacking a type of position and is being omitted, check if desired...")
-            print(row)
+            # print("Below is lacking a type of position and is being omitted, check if desired...")
+            # print(row)
             continue # if not offense, defense, ball and carrier in play
         if np.isinf(image).any():
-            print("Below has infinity feature output and is being omitted, check if desired...")
-            print(row)
+            # print("Below has infinity feature output and is being omitted, check if desired...")
+            # print(row)
             continue
         images.append(image)
         labels.append(play_object.get_end_of_play_matrix(N = N))
     tackle_dataset = TackleAttemptDataset(images = images, labels = labels, play_ids = play_ids, frame_ids = frame_ids)
 
-    with open("data/tackle_images_10_output_5_test.pkl", f'wb') as outp:  # Overwrites any existing file.
+    with open("data/tackle_images_5_output_5_test.pkl", f'wb') as outp:  # Overwrites any existing file.
         pickle.dump(tackle_dataset, outp, pickle.HIGHEST_PROTOCOL)
 
 print("Getting training and validation images....")
@@ -73,7 +72,7 @@ images = []
 labels = []
 play_ids = []
 frame_ids = []
-for bag in range(1):
+for bag in range(10):
     print(f"COMPLETING BAG {bag}....")
     # Choose random frame from each play
     images = []
@@ -98,7 +97,7 @@ for bag in range(1):
         labels.append(play_object.get_end_of_play_matrix(N = N))
     tackle_dataset = TackleAttemptDataset(images = images, labels = labels, play_ids = play_ids, frame_ids = frame_ids)
 
-    with open(f"data/tackle_images_1_output_1_bag_{bag}_stratified.pkl", f'wb') as outp:  # Overwrites any existing file.
+    with open(f"data/tackle_images_5_output_5_bag_{bag}_stratified.pkl", f'wb') as outp:  # Overwrites any existing file.
         pickle.dump(tackle_dataset, outp, pickle.HIGHEST_PROTOCOL)
 
 

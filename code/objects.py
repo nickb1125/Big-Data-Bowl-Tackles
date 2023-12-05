@@ -12,6 +12,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 import random
+import pickle
 
 def get_player_movement_features(player_df, N):
     x_mat = np.tile(np.arange(0, 120, N)+(N/2), (math.ceil(54/N), 1))
@@ -112,14 +113,14 @@ class play:
         off_movement_features = get_player_movement_features(off_df, N)
         off_acc_mat = off_movement_features['field_weighted_acc']
         off_vel_mat = off_movement_features['field_weighted_velocity']
-        off_acc_mat_weight = np.array(distance_offense_from_ballcarrier)[:, np.newaxis, np.newaxis] * off_acc_mat
-        off_vel_mat_weight = np.array(distance_offense_from_ballcarrier)[:, np.newaxis, np.newaxis] * off_vel_mat
+        # off_acc_mat_weight = np.array(distance_offense_from_ballcarrier)[:, np.newaxis, np.newaxis] * off_acc_mat
+        # off_vel_mat_weight = np.array(distance_offense_from_ballcarrier)[:, np.newaxis, np.newaxis] * off_vel_mat
 
         def_movement_features = get_player_movement_features(def_df, N)
         def_acc_mat = def_movement_features['field_weighted_acc']
         def_vel_mat = def_movement_features['field_weighted_velocity']
-        def_acc_mat_weight = np.array(distance_defense_from_ballcarrier)[:, np.newaxis, np.newaxis] * def_acc_mat
-        def_vel_mat_weight = np.array(distance_defense_from_ballcarrier)[:, np.newaxis, np.newaxis] * def_vel_mat
+        # def_acc_mat_weight = np.array(distance_defense_from_ballcarrier)[:, np.newaxis, np.newaxis] * def_acc_mat
+        # def_vel_mat_weight = np.array(distance_defense_from_ballcarrier)[:, np.newaxis, np.newaxis] * def_vel_mat
 
         ball_movement_features = get_player_movement_features(ball_df, N)
         ball_acc_mat = ball_movement_features['field_weighted_acc']
@@ -130,14 +131,10 @@ class play:
 
         ret = np.stack([off_density, def_density, 
                 np.sum(ball_vel_mat, axis = 0), np.sum(ball_acc_mat, axis = 0),
-                np.sum(off_vel_mat, axis = 0), 
-                np.sum(off_acc_mat, axis = 0), 
-                np.sum(def_vel_mat, axis = 0), 
-                np.sum(def_acc_mat, axis = 0),
-                np.sum(off_vel_mat_weight, axis = 0), 
-                np.sum(off_acc_mat_weight, axis = 0), 
-                np.sum(def_vel_mat_weight, axis = 0), 
-                np.sum(def_acc_mat_weight, axis = 0)
+                np.sum(off_vel_mat, axis = 0), np.std(off_vel_mat, axis = 0), 
+                np.sum(off_acc_mat, axis = 0), np.std(off_acc_mat, axis = 0),
+                np.sum(def_vel_mat, axis = 0), np.std(def_vel_mat, axis = 0), 
+                np.sum(def_acc_mat, axis = 0), np.std(def_acc_mat, axis = 0),
                 ])
         if not plot:
             return ret
@@ -217,25 +214,21 @@ class TackleNet(nn.Module):
         super(TackleNet, self).__init__()
         
         # Convolutional layers
-        self.conv1 = nn.Conv2d(nvar, 5, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv2d(5, 1, kernel_size=3, padding=1)
-        self.pool1 = nn.MaxPool2d(kernel_size = 2, stride=1)
-        self.pool2 = nn.MaxPool2d(kernel_size = 2, stride=1)
+        self.conv1 = nn.Conv2d(nvar, 12, kernel_size=3, padding=1)
+        self.pool1 = nn.MaxPool2d(kernel_size = 5, stride=1)        
         self.dropout1 = nn.Dropout(0.2)
 
         # Fully connected layers
-        self.fc1 = nn.Linear(6136, 1024)
-        self.fc2 = nn.Linear(1024, math.ceil(120/N)*math.ceil(54/N))
+        self.fc1 = nn.Linear(3168, math.ceil(120/N)*math.ceil(54/N))
         self.N = N
         
     def forward(self, x):
-        x = self.pool1(F.relu(self.conv1(self.dropout1(x))))
-        x = self.pool2(F.relu(self.conv2(x)))
+        x = F.relu(self.conv1(x))
         # Flatten the output for the fully connected layers
         x = x.view(x.size(0), -1)
         # print(x.shape)
 
-        x = F.softmax(self.fc2(self.fc1(x)), dim=1)
+        x = F.softmax(self.fc1(x), dim=1)
         
         # Apply softmax to ensure the output sums to 1 along the channel dimension (12*6)
         x = x.view(-1, math.ceil(120/self.N), math.ceil(54/self.N))
@@ -266,19 +259,27 @@ def plot_predictions(prediction_output, true):
     # Adjust spacing between subplots to make them look better
     plt.subplots_adjust(wspace=0.2, hspace=0.2)
     plt.show()
-    
-def euclidean_distance(x1, y1, x2, y2):
-    return np.sqrt((x1 - x2)**2 + (y1 - y2)**2)
 
 class TackleNetEnsemble:
 
-    def __init__(self, models):
-        self.models = models
+    def __init__(self, num_models):
+        self.models = dict()
+        self.num_models = num_models
+        for mod_num in range(num_models):
+            with open(f"model_{mod_num}.pkl", 'rb') as f:
+                model = pickle.load(f)
+            self.models.update({mod_num : model})
     
-    def predict_pdf(image):
-        pass
-        # np.array()
-        # for model in models:
-        #     pred = model(image)
+    def predict_pdf(self, image):
+        preds = []
+        for mod_num in range(self.num_models):
+            model = self.models[mod_num]
+            pred = model(image)
+            preds.append(pred)
+        preds = torch.stack(preds)
+        overall_pred = torch.mean(preds, axis = 0)
+        return overall_pred
+        
+
 
 

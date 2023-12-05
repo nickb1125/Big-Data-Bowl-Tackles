@@ -12,11 +12,19 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 import random
-from objects import euclidean_distance, play, TackleAttemptDataset, TackleNet, plot_predictions, CustomLoss
+from objects import play, TackleAttemptDataset, TackleNet, plot_predictions, CustomLoss, TackleNetEnsemble
 import pickle
 
-for bag in range(1):
-    with open(f'data/tackle_images_1_output_1_bag_{bag}_stratified.pkl', 'rb') as f:
+with open(f'data/tackle_images_5_output_5_test.pkl', 'rb') as f:
+    test_dataset = pickle.load(f)
+test_dataloader = DataLoader(test_dataset, batch_size=64, shuffle=True)
+
+# Define Loss
+criterion = nn.BCELoss()
+
+# Train bagged models
+for bag in range(10):
+    with open(f'data/tackle_images_5_output_5_bag_{bag}_stratified.pkl', 'rb') as f:
         tackle_dataset = pickle.load(f)
 
     train_data, val_data = torch.utils.data.random_split(tackle_dataset, [0.9, 0.1])
@@ -27,18 +35,14 @@ for bag in range(1):
     train_dataloader = DataLoader(train_data, batch_size=512, shuffle=True)
     val_loader = DataLoader(val_data, batch_size=64)
 
-    # Define the loss function (you can choose an appropriate loss function for your task)
-    criterion = nn.BCELoss()
-    # criterion = CustomLoss()
-
     # Create Model
-    model = TackleNet(N = 1, nvar = 12)
+    model = TackleNet(N = 5, nvar = 12)
 
     # Define the optimizer (e.g., Stochastic Gradient Descent)
-    optimizer = optim.Adam(model.parameters(), lr=0.0001)
+    optimizer = optim.Adam(model.parameters(), lr=0.0005)
 
     # Training loop
-    num_epochs = 5
+    num_epochs = 10
 
     print(f"Training TackleNet bag {bag}...")
     print("---------------------")
@@ -74,8 +78,6 @@ for bag in range(1):
             i = 0
             for X_batch, y_batch in val_loader:
                 outputs = model(X_batch)
-                if (i == 0) & (epoch == num_epochs-1):
-                    plot_predictions(outputs, y_batch)
                 predictions.append(outputs.flatten())
                 true_labels.append(y_batch.flatten())
                 # for accuracy:
@@ -94,25 +96,81 @@ for bag in range(1):
         print(f"Validation Loss: {val_loss}")
         print(f"Validation Accuracy: {acc}")
 
-    plt.figure(figsize=(10, 5))
-    plt.plot(losses, label='Training Loss')
-    plt.plot(val_losses, label='Validation Loss')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.title('Loss Over Time')
-    plt.legend()
-    plt.grid(True)
-    plt.show()
+    ### For test set
+    predictions = []
+    true_labels = []
+    exact_correct = []
+    with torch.no_grad():  # Disable gradient computation for inference
+        i = 0
+        for X_batch, y_batch in test_dataloader:
+            outputs = model(X_batch)
+            predictions.append(outputs.flatten())
+            true_labels.append(y_batch.flatten())
+            # for accuracy:
+            max_values, _ = torch.max(outputs, dim=-1, keepdim=True)
+            max_values, _ = torch.max(max_values, dim=-2, keepdim=True)
+            masks = torch.where(outputs == max_values, 1, 0)
+            equivalence_values = np.all(masks.detach().numpy() == y_batch.detach().numpy(), axis=(1, 2)).tolist()
+            exact_correct.extend(equivalence_values)
+            i += 1
+        predictions = torch.cat(predictions, dim=0) 
+        true_labels = torch.cat(true_labels, dim=0) 
+        test_loss = criterion(predictions, true_labels)
+    test_acc = sum(exact_correct)/len(exact_correct)
+    print(f"Bag {bag} Final Test Preformance:")
+    print("---------------------------------")
+    print(f"Test Loss: {test_loss}")
+    print(f"Test Accuracy: {test_acc}")
 
-    plt.figure(figsize=(10, 5))
-    plt.plot(val_accuracy, label='Training Loss')
-    plt.xlabel('Epoch')
-    plt.ylabel('Validation Accuracy')
-    plt.title('Validation Binary Prediction Accuracy Over Time')
-    plt.legend()
-    plt.grid(True)
-    plt.show()
 
-    with open("model_{bag}.pkl", f'wb') as outp:  # Overwrites any existing file.
+    # plt.figure(figsize=(10, 5))
+    # plt.plot(losses, label='Training Loss')
+    # plt.plot(val_losses, label='Validation Loss')
+    # plt.xlabel('Epoch')
+    # plt.ylabel('Loss')
+    # plt.title('Loss Over Time')
+    # plt.legend()
+    # plt.grid(True)
+    # plt.show()
+
+    # plt.figure(figsize=(10, 5))
+    # plt.plot(val_accuracy, label='Training Loss')
+    # plt.xlabel('Epoch')
+    # plt.ylabel('Validation Accuracy')
+    # plt.title('Validation Binary Prediction Accuracy Over Time')
+    # plt.legend()
+    # plt.grid(True)
+    # plt.show()
+
+    with open(f"model_{bag}.pkl", f'wb') as outp:  # Overwrites any existing file.
         pickle.dump(model, outp, pickle.HIGHEST_PROTOCOL)
+
+### Final ensemble on test
+ensemble_model = TackleNetEnsemble(num_models=10)
+predictions = []
+true_labels = []
+exact_correct = []
+with torch.no_grad():  # Disable gradient computation for inference
+    i = 0
+    for X_batch, y_batch in test_dataloader:
+        outputs = ensemble_model.predict_pdf(X_batch)
+        if (i == 0):
+            plot_predictions(outputs, y_batch)
+        predictions.append(outputs.flatten())
+        true_labels.append(y_batch.flatten())
+        # for accuracy:
+        max_values, _ = torch.max(outputs, dim=-1, keepdim=True)
+        max_values, _ = torch.max(max_values, dim=-2, keepdim=True)
+        masks = torch.where(outputs == max_values, 1, 0)
+        equivalence_values = np.all(masks.detach().numpy() == y_batch.detach().numpy(), axis=(1, 2)).tolist()
+        exact_correct.extend(equivalence_values)
+        i += 1
+    predictions = torch.cat(predictions, dim=0) 
+    true_labels = torch.cat(true_labels, dim=0) 
+    test_loss = criterion(predictions, true_labels)
+test_acc = sum(exact_correct)/len(exact_correct)
+print(f"ENSEMBLE MODEL Final Test Preformance:")
+print("---------------------------------")
+print(f"Test Loss: {test_loss}")
+print(f"Test Accuracy: {test_acc}")
 
