@@ -47,6 +47,7 @@ plot_play <- function(game_id, play_id, pred = TRUE, contribution_only = FALSE) 
                                TRUE ~ "defense"))
     describe <- (plays %>% filter(gameId == game_id, playId == play_id))$playDescription[1]
     all_frames <- unique(play_df$frameId)
+    max_p <- max(pred_df$prob)
     oopt = ani.options(interval = 1/10)
     saveGIF({for (i in min(all_frames):max(all_frames)) {
       play_df_frame <- play_df %>% filter(frameId == i)
@@ -58,53 +59,37 @@ plot_play <- function(game_id, play_id, pred = TRUE, contribution_only = FALSE) 
       min_y = 0
       max_y = 54
       if (pred == TRUE) {
-        p <- ggplot() + geom_tile(data = pred_df_frame, aes(x = x, y = y, fill = prob), width = 10, height = 10)
+        main <- ggplot() + geom_tile(data = pred_df_frame, aes(x = x, y = y, fill = prob), width = 10, height = 10)
       }
       else {
-        p <- ggplot()
+        main <- ggplot()
       }
-      p <- p +
-        scale_fill_gradient(low = "white", high = "brown1", limits = c(0, 1)) + 
-        geom_point(data = play_df_frame, aes(x = x, y = y, size = type, color = type, shape = type))  +
-        scale_shape_manual(values = c(20, 18, 18)) +
-        scale_size_manual(values = c(2, 5, 5)) +
-        scale_color_manual(values = c("grey", "cornflowerblue", "lightseagreen")) +
+      main <- main +
+        scale_fill_gradient(low = "grey", high = "brown1", limits = c(0, max_p)) +
             geom_vline(aes(xintercept = seq(round_any(min_x, 5, f = floor), 
                                           round_any(max_x, 5, f = ceiling), by = 5)), 
-                     color = 'grey') +
+                     color = 'white') +
           geom_segment(aes(x = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
                            y = rep(70.9 / 3 - 0.5, length(seq(round_any(min_x, 5, f = floor), 
                                                                  round_any(max_x, 5, f = ceiling), by = 1 )) ), 
                            xend = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
                            yend = rep(70.9 / 3 + 0.5, length(seq(round_any(min_x, 5, f = floor), 
                                                                  round_any(max_x, 5, f = ceiling), by = 1 ))) ), 
-                       color = 'grey') +
+                       color = 'white') +
           geom_segment(aes(x = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
                            y = rep(70.8 / 3 + 18.5 / 3 - 0.5, length(seq(round_any(min_x, 5, f = floor), 
                                                                  round_any(max_x, 5, f = ceiling), by = 1 )) ), 
                            xend = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
                            yend = rep(70.8 / 3 + 18.5 / 3 + 0.5, length(seq(round_any(min_x, 5, f = floor), 
                                                                  round_any(max_x, 5, f = ceiling), by = 1 ))) ), 
-                       color = 'grey') + ylab("") + xlab("") + 
-        geom_hline(yintercept = 0, color = 'grey')  + geom_hline(yintercept = 54, color = 'grey') + geom_vline(xintercept = 0, color = 'grey') + 
-        geom_vline(xintercept = 120, color = 'grey') +
+                       color = 'white') + ylab("") + xlab("") + 
+        geom_hline(yintercept = 0, color = 'white')  + geom_hline(yintercept = 54, color = 'white') + geom_vline(xintercept = 0, color = 'white') + 
+        geom_vline(xintercept = 120, color = 'white')  + 
+        geom_point(data = play_df_frame, aes(x = x, y = y, size = type, color = type, shape = type))  +
+        scale_shape_manual(values = c(20, 18, 18)) +
+        scale_size_manual(values = c(2, 5, 5)) +
+        scale_color_manual(values = c("white", "cornflowerblue", "lightseagreen")) +
         labs(title = "Tackle Classifier Example", x = "", y = "", caption = describe) + xlim(0, 120) + ylim(0, 54) + theme_minimal() 
-      print(p)
-      print(paste0("Frame ", i))
-      ani.pause()}
-    },movie.name="facet_zoom_2.gif",ani.width = 600, ani.height = 300)
-  }
-  if (pred==TRUE) {
-    pred_df <- read.csv(paste0("/Users/nickbachelder/Desktop/Personal Code/Kaggle/Tackles/", game_id, "_", play_id, ".csv")) %>% dplyr::select(-X) %>% 
-        mutate(x = as.numeric(x) + 2.5, y = as.numeric(y) + 2.5) 
-    print("--------------------")
-    print('Getting contribution GIF')
-    print("--------------------")
-    saveGIF({for (i in min(all_frames):max(all_frames)) {
-      min_x = 10
-      max_x = 110
-      min_y = 0
-      max_y = 54
       plot_list <- list()
       all_omit <- (pred_df %>% filter(omit!=0))$omit %>% unique()
       iter <- 1
@@ -113,54 +98,80 @@ plot_play <- function(game_id, play_id, pred = TRUE, contribution_only = FALSE) 
         name <- (play_df_frame %>% filter(nflId == id))$displayName[1]
         pred_df_frame <- pred_df %>% filter(frameId == i, omit == id) 
         p <- ggplot() + geom_tile(data = pred_df_frame, aes(x = x, y = y, fill = prob), width = 10, height = 10)  +
-          scale_fill_gradient2(midpoint = 0, low = "blue", mid = "white", high = "brown1", limits = c(-.1, .1)) +
-          geom_point(data = play_df_frame, aes(x = x, y = y, size = type, color = type, shape = type))  +
-          scale_shape_manual(values = c(20, 18, 18)) +
-          scale_size_manual(values = c(2, 5, 5)) +
-          scale_color_manual(values = c("grey", "cornflowerblue", "lightseagreen")) +
+          scale_fill_gradient2(midpoint = 0, low = "blue", mid = "grey", high = "brown1", limits = c(-.1, .1)) +
               geom_vline(aes(xintercept = seq(round_any(min_x, 5, f = floor), 
                                             round_any(max_x, 5, f = ceiling), by = 5)), 
-                       color = 'grey') +
+                       color = 'white') +
             geom_segment(aes(x = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
                              y = rep(70.9 / 3 - 0.5, length(seq(round_any(min_x, 5, f = floor), 
                                                                    round_any(max_x, 5, f = ceiling), by = 1 )) ), 
                              xend = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
                              yend = rep(70.9 / 3 + 0.5, length(seq(round_any(min_x, 5, f = floor), 
                                                                    round_any(max_x, 5, f = ceiling), by = 1 ))) ), 
-                         color = 'grey') +
+                         color = 'white') +
             geom_segment(aes(x = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
                              y = rep(70.8 / 3 + 18.5 / 3 - 0.5, length(seq(round_any(min_x, 5, f = floor), 
                                                                    round_any(max_x, 5, f = ceiling), by = 1 )) ), 
                              xend = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
                              yend = rep(70.8 / 3 + 18.5 / 3 + 0.5, length(seq(round_any(min_x, 5, f = floor), 
                                                                    round_any(max_x, 5, f = ceiling), by = 1 ))) ), 
-                         color = 'grey') + ylab("") + xlab("") + 
-          geom_hline(yintercept = 0, color = 'grey')  + geom_hline(yintercept = 54, color = 'grey') + geom_vline(xintercept = 0, color = 'grey') + 
-          geom_vline(xintercept = 120, color = 'grey') + xlim(0, 120) + ylim(0, 54) + theme_void() + theme(legend.position = "none") + ggtitle(name)
+                         color = 'white') + ylab("") + xlab("") + 
+          geom_hline(yintercept = 0, color = 'white')  + geom_hline(yintercept = 54, color = 'white') + geom_vline(xintercept = 0, color = 'white') + 
+          geom_vline(xintercept = 120, color = 'white') + xlim(0, 120) + ylim(0, 54)  +
+          geom_point(data = play_df_frame, aes(x = x, y = y, size = type, color = type, shape = type))  +
+          scale_shape_manual(values = c(20, 18, 18)) +
+          scale_size_manual(values = c(2, 5, 5)) +
+          scale_color_manual(values = c("white", "cornflowerblue", "lightseagreen")) + theme_void() + theme(legend.position = "none") + ggtitle(name)
         plot_list[[iter]] <- p
         iter = iter+1
       }
       arranged_plots <- ggarrange(plotlist = plot_list, ncol = 3, nrow = 4)
-      print(annotate_figure(arranged_plots, top = text_grob("Tackle Probability Added",  face = "bold", size = 14)))
+      arranged_plots2 <-ggarrange(plotlist = list(main, arranged_plots), ncol = 1, nrow = 2)
+      print(arranged_plots2)
       print(paste0("Frame ", i))
       ani.pause()}
-    },movie.name="facet_zoom_3.gif",ani.width = 1200, ani.height = 600)
+    },movie.name="facet_zoom_2.gif",ani.width = 600, ani.height = 600)
+  }
+  if (pred==TRUE) {
+    features <- read.csv(paste0("/Users/nickbachelder/Desktop/Personal Code/Kaggle/Tackles/features_", game_id, "_", play_id, ".csv")) %>% 
+      dplyr::select(-X) %>% pivot_longer(cols = !c(x, y, frameId)) 
+    
+    oopt = ani.options(interval = 1/10)
+    saveGIF({for (i in 1:(max(features$frameId)-1)) {
+      image_this_frame <- features %>% filter(frameId == i) 
+      plots_list <- list()
+      # Iterate over unique feature names and create heat maps
+      for (feature_name in unique(image_this_frame$name)) {
+        feature_data <- subset(image_this_frame, name == feature_name)
+        
+        # Create a ggplot for each feature
+        plot <- ggplot(feature_data, aes(x = x, y = y, fill = value)) +
+          geom_tile() +
+          ggtitle(feature_name) +
+          scale_fill_gradient2(low = "mediumpurple1", mid = 'azure1', high = "red", midpoint = 0) + 
+          guides(fill="none") + theme_void() + xlab("") + ylab("")  # Adjust the color scale as needed
+        
+        # Append the plot to the list
+        plots_list[[feature_name]] <- plot
+      }
+      
+      # Arrange the plots using ggarrange
+      p <- ggarrange(plotlist = plots_list, ncol = 3, nrow = 4)
+      print(p)
+      print(paste0(i, " out of ", max(features$frameId) - 1))
+      ani.pause()}
+    }, movie.name="facet_zoom.gif",ani.width = 600, ani.height = 300)
   }
 }
 ```
 
 ```{r}
-plot_play(game_id=2022100212, play_id=2007, pred = TRUE, contribution_only = TRUE)
+plot_play(game_id=2022100212, play_id=2007, pred = TRUE, contribution_only = FALSE)
 ```
 
 
 
-```{r}
-pred_df <- read.csv(paste0("/Users/nickbachelder/Desktop/Personal Code/Kaggle/Tackles/", game_id, "_", play_id, ".csv")) %>% dplyr::select(-X) %>% 
-        mutate(x = as.numeric(x) + 2.5, y = as.numeric(y) + 2.5) 
 
-pred_df %>% filter(omit != 0)
-```
 
 
 
@@ -232,42 +243,6 @@ pred_df$omit %>% unique()
 
 
 ```{r}
-features <- read.csv("/Users/nickbachelder/Desktop/Personal Code/Kaggle/Tackles/features_2022100204_123.csv") %>% 
-  dplyr::select(-X) %>% pivot_longer(cols = !c(x, y, frameId)) 
 
-#%>% group_by(name, frameId) %>% mutate(value_mean = mean(value), value_sd = sd(value), value_normalized = ifelse(value_sd == 0, 0, (value-value_mean)/value_sd )) %>% ungroup()
-
-
-
-play_tweened <- features %>%
-  tweenr::tween_components(time = frameId, 
-                           id = c(name),
-                           ease = "linear", 
-                           nframes = max(features$frameId))
-oopt = ani.options(interval = 1/10)
-saveGIF({for (i in 1:(max(features$frameId)-1)) {
-  image_this_frame <- features %>% filter(frameId == i) 
-  plots_list <- list()
-  # Iterate over unique feature names and create heat maps
-  for (feature_name in unique(image_this_frame$name)) {
-    feature_data <- subset(image_this_frame, name == feature_name)
-    
-    # Create a ggplot for each feature
-    plot <- ggplot(feature_data, aes(x = x, y = y, fill = value)) +
-      geom_tile() +
-      ggtitle(feature_name) +
-      scale_fill_gradient2(low = "mediumpurple1", mid = 'azure1', high = "red", midpoint = 0) + 
-      guides(fill="none") + theme_void() + xlab("") + ylab("")  # Adjust the color scale as needed
-    
-    # Append the plot to the list
-    plots_list[[feature_name]] <- plot
-  }
-  
-  # Arrange the plots using ggarrange
-  p <- ggarrange(plotlist = plots_list, ncol = 3, nrow = 4)
-  print(p)
-  print(paste0(i, " out of ", max(features$frameId) - 1))
-  ani.pause()}
-}, movie.name="facet_zoom.gif",ani.width = 600, ani.height = 300)
 ```
 

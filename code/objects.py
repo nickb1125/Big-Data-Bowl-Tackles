@@ -15,12 +15,15 @@ import random
 import pickle
 
 class play:
-    def __init__(self, game_id, play_id, tracking):
+    def __init__(self, game_id, play_id, tracking, cache = dict()):
+        self.game_id = game_id
+        self.play_id = play_id
         self.tracking_df = tracking.query("gameId == @game_id & playId ==  @play_id")
         self.ball_carry_id = self.tracking_df.ballCarrierId.reset_index(drop =1)[0]
         self.min_frame = min(self.tracking_df.frameId)
         self.num_frames = max(self.tracking_df.frameId)
         self.eop = self.get_end_of_play_location()
+        self.cache = cache
 
     def get_end_of_play_location(self):
         end_of_play_carrier = self.tracking_df.query("nflId == @self.ball_carry_id & frameId == @self.num_frames")
@@ -47,6 +50,11 @@ class play:
                 for player_type in ["Offense", "Defense", "Carrier"]}
 
     def get_grid_features(self, frame_id, N, plot = False, without_player_id = 0):
+        if f"{self.game_id}_{self.play_id}" in self.cache.keys():
+            images_batch = self.cache[f"{self.game_id}_{self.play_id}"][without_player_id]
+            image_this_frame = images_batch.detach().numpy()[frame_id-self.min_frame, :, :, :]
+            return image_this_frame
+
         stratified_dfs = self.refine_tracking(frame_id = frame_id)
         off_df = stratified_dfs["Offense"]
         def_df = stratified_dfs["Defense"]
@@ -94,12 +102,18 @@ class play:
             # Adjust layout for better visualization
             plt.tight_layout()
             plt.show()
+
+    def get_full_play_tackle_image(self, N, without_player_id = 0):
+        if f"{self.game_id}_{self.play_id}" in self.cache.keys():
+            images_batch = self.cache[f"{self.game_id}_{self.play_id}"][without_player_id]
+            return images_batch
+        batch_images = torch.FloatTensor(np.array([
+            self.get_grid_features(frame_id=i, N=N, without_player_id=without_player_id)
+            for i in range(self.min_frame, self.num_frames+1)]))
+        return batch_images
     
     def predict_tackle_distribution(self, model, without_player_id = 0, to_df = True):
-        pred_list = []
-        batch_images = torch.FloatTensor(np.array([
-            self.get_grid_features(frame_id=i, N=model.N, without_player_id=without_player_id)
-            for i in range(self.min_frame, self.num_frames+1)]))
+        batch_images = self.get_full_play_tackle_image(N = model.N, without_player_id=without_player_id)
         outputs = model.predict_pdf(batch_images).detach().numpy()
         if to_df:
             ret = array_to_field_dataframe(input_array=outputs, N=model.N)
@@ -107,9 +121,11 @@ class play:
             return ret
         return outputs
     
-    def get_contribution_matricies(self, model, to_df = True):
+    def get_contribution_matricies(self, model, to_df = True, marginal_x = False):
         original = self.predict_tackle_distribution(model=model, without_player_id = 0, to_df = False)
-        
+        if marginal_x:
+            original = np.sum(original, axis = 2)
+
         # Predict ommissions
         def_df = self.refine_tracking(frame_id = self.min_frame)["Defense"]
         def_ids = def_df.nflId.unique()
@@ -120,9 +136,12 @@ class play:
             contribution_list = [original_df]
         for id in tqdm(def_ids):
             w_omission = self.predict_tackle_distribution(model = model, without_player_id = id, to_df = False)
+            if marginal_x:
+                contribution_mat = np.sum(w_omission, axis = 2)
             contribution_mat = original-w_omission
+            print(contribution_mat.shape)
             if to_df:
-                contribution_df = array_to_field_dataframe(input_array=contribution_mat, N=model.N) 
+                contribution_df = array_to_field_dataframe(input_array=contribution_mat, N=model.N, marginalized = marginal_x)
                 contribution_df['frameId'] = contribution_df['frameId']+self.min_frame+1
                 contribution_df['omit'] = id
                 contribution_list.append(contribution_df)
@@ -131,10 +150,6 @@ class play:
         if to_df:
             return pd.concat(contribution_list, axis = 0)
         return contribution_dict
-    
-    def get_contributions_over_play(self, model):
-        contribution_dict = self.get_contribution_matricies(model, to_df = False)
-        # define method to integrate over locational help and get metric
                 
 
 
@@ -262,8 +277,15 @@ class TackleNetEnsemble:
         overall_pred = torch.mean(preds, axis = 0)
         return overall_pred
     
-def array_to_field_dataframe(input_array, N):
+def array_to_field_dataframe(input_array, N, marginalized = False):
     pred_list=[]
+    if marginalized:
+        for frame_id in range(input_array.shape[0]):
+            for x in range(input_array.shape[1]):
+                new_row = pd.DataFrame({"x" : [x*N+N/2], "prob" : [input_array[frame_id, x]], "frameId" : [frame_id]})
+                pred_list.append(new_row)
+        pred_df = pd.concat(pred_list, axis = 0)
+        return pred_df 
     for frame_id in range(input_array.shape[0]):
         for x in range(input_array.shape[1]):
             for y in range(input_array.shape[2]):
@@ -272,25 +294,35 @@ def array_to_field_dataframe(input_array, N):
     pred_df = pd.concat(pred_list, axis = 0)
     return pred_df
 
-class contributionCache:
+class imageCache:
 
     def __init__(self, N):
         self.cache = dict()
         self.N = N
-        self.model = TackleNetEnsemble(num_models=10, N = 5)
 
     def populate(self):
+        print("Loading neccecary data...")
+        print("--------------------------")
         plays = pd.read_csv("data/nfl-big-data-bowl-2024/plays.csv")
         tracking = pd.concat([pd.read_csv(f"data/nfl-big-data-bowl-2024/tracking_a_week_{week}.csv") for week in range(1, 10)])
-        plays = tracking[['gameId', 'playId']].drop_duplicates().merge(plays, how = 'left', on = ['gameId', 'playId'])
-        
+        plays = tracking[['gameId', 'playId', 'week']].drop_duplicates().merge(plays, how = 'left', on = ['gameId', 'playId'])
+
         for week in range(1, 10):
-            print(f"Populating week {week}.")
-            plays_week = plays.query("week = @week")
-            track_week = tracking.query("week = @week")
-            for index, row in plays_week.iterrows():
-                play_object = play(row.gameId, row.playId, track_week)
-                # get_contributions_over_play
+            print(f"Populating week {week}...")
+            print("--------------------------")
+            plays_week = plays.query("week == @week")
+            for index, row in tqdm(plays_week.iterrows()):
+                self.cache.update({f"{row.gameId}_{row.playId}" : dict()})
+                play_object = play(row.gameId, row.playId, tracking)
+                try:
+                    def_ids = play_object.refine_tracking(frame_id = play_object.min_frame)["Defense"].nflId.unique().tolist()
+                except ValueError:
+                    print(f"Omitting play {row.gameId}_{row.playId} for incompleteness..")
+                    continue
+                def_ids.append(0) # add no removal image
+                for id in def_ids:
+                    full_play_image = play_object.get_full_play_tackle_image(N=self.N, without_player_id = id)
+                    self.cache[f"{row.gameId}_{row.playId}"].update({id : full_play_image})
 
 
 
