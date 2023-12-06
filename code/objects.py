@@ -94,14 +94,6 @@ class play:
             # Adjust layout for better visualization
             plt.tight_layout()
             plt.show()
-
-    def get_all_grid_features_for_plot(self, N):
-        all_features = pd.DataFrame()
-        for frame_id in range(1, self.num_frames):
-            grid_feat = self.get_grid_features(frame_id = frame_id, N = N, matrix_form = False)
-            grid_feat['frameId'] = frame_id
-            all_features = pd.concat([all_features, grid_feat], axis = 0)
-        return(all_features)
     
     def predict_tackle_distribution(self, model, without_player_id = 0, to_df = True):
         pred_list = []
@@ -117,35 +109,36 @@ class play:
     
     def get_contribution_matricies(self, model, to_df = True):
         original = self.predict_tackle_distribution(model=model, without_player_id = 0, to_df = False)
+        
         # Predict ommissions
         def_df = self.refine_tracking(frame_id = self.min_frame)["Defense"]
         def_ids = def_df.nflId.unique()
         contribution_dict = dict()
-        contribution_list = []
+        if to_df:
+            original_df = self.predict_tackle_distribution(model=model, without_player_id = 0, to_df = True)
+            original_df['omit'] = 0
+            contribution_list = [original_df]
         for id in tqdm(def_ids):
-            w_omission = self.predict_tackle_distribution(model = model, without_player_id = id, to_df = False).numpy()
+            w_omission = self.predict_tackle_distribution(model = model, without_player_id = id, to_df = False)
             contribution_mat = original-w_omission
             if to_df:
                 contribution_df = array_to_field_dataframe(input_array=contribution_mat, N=model.N) 
                 contribution_df['frameId'] = contribution_df['frameId']+self.min_frame+1
-                contribution_df['nflId'] = id
+                contribution_df['omit'] = id
                 contribution_list.append(contribution_df)
                 continue
             contribution_dict.update({id : contribution_mat})
         if to_df:
             return pd.concat(contribution_list, axis = 0)
         return contribution_dict
-
-
-        
-
-        original = self.predict_tackle_distribution(model = model)
-        original['omit'] = 0
+    
+    def get_contributions_over_play(self, model):
+        contribution_dict = self.get_contribution_matricies(model, to_df = False)
+        # define method to integrate over locational help and get metric
                 
 
 
 class TackleAttemptDataset:
-
     def __init__(self, images, labels, play_ids, frame_ids):
         self.playIds = play_ids
         self.frameIds = frame_ids
@@ -278,6 +271,29 @@ def array_to_field_dataframe(input_array, N):
                 pred_list.append(new_row)
     pred_df = pd.concat(pred_list, axis = 0)
     return pred_df
+
+class contributionCache:
+
+    def __init__(self, N):
+        self.cache = dict()
+        self.N = N
+        self.model = TackleNetEnsemble(num_models=10, N = 5)
+
+    def populate(self):
+        plays = pd.read_csv("data/nfl-big-data-bowl-2024/plays.csv")
+        tracking = pd.concat([pd.read_csv(f"data/nfl-big-data-bowl-2024/tracking_a_week_{week}.csv") for week in range(1, 10)])
+        plays = tracking[['gameId', 'playId']].drop_duplicates().merge(plays, how = 'left', on = ['gameId', 'playId'])
+        
+        for week in range(1, 10):
+            print(f"Populating week {week}.")
+            plays_week = plays.query("week = @week")
+            track_week = tracking.query("week = @week")
+            for index, row in plays_week.iterrows():
+                play_object = play(row.gameId, row.playId, track_week)
+                # get_contributions_over_play
+
+
+
         
 
 

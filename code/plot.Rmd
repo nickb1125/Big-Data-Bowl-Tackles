@@ -112,8 +112,8 @@ plot_play <- function(game_id, play_id, pred = TRUE, contribution_only = FALSE) 
         play_df_frame <- play_df %>% filter(frameId == i) %>% filter(nflId == id | type == 'ball')
         name <- (play_df_frame %>% filter(nflId == id))$displayName[1]
         pred_df_frame <- pred_df %>% filter(frameId == i, omit == id) 
-        p <- ggplot() + geom_tile(data = pred_df_frame, aes(x = x, y = y, fill = prob), width = 10, height = 10) +
-          scale_fill_gradient(low = "white", high = "brown1", limits = c(0, 1)) + 
+        p <- ggplot() + geom_tile(data = pred_df_frame, aes(x = x, y = y, fill = prob), width = 10, height = 10)  +
+          scale_fill_gradient2(midpoint = 0, low = "blue", mid = "white", high = "brown1", limits = c(-.1, .1)) +
           geom_point(data = play_df_frame, aes(x = x, y = y, size = type, color = type, shape = type))  +
           scale_shape_manual(values = c(20, 18, 18)) +
           scale_size_manual(values = c(2, 5, 5)) +
@@ -144,7 +144,7 @@ plot_play <- function(game_id, play_id, pred = TRUE, contribution_only = FALSE) 
       print(annotate_figure(arranged_plots, top = text_grob("Tackle Probability Added",  face = "bold", size = 14)))
       print(paste0("Frame ", i))
       ani.pause()}
-    },movie.name="facet_zoom_3.gif",ani.width = 600, ani.height = 300)
+    },movie.name="facet_zoom_3.gif",ani.width = 1200, ani.height = 600)
   }
 }
 ```
@@ -155,48 +155,14 @@ plot_play(game_id=2022100212, play_id=2007, pred = TRUE, contribution_only = TRU
 
 
 
-
-
-
 ```{r}
-plot_list <- list()
-all_omit <- (pred_df %>% filter(omit!=0))$omit %>% unique()
-iter <- 1
-for (id in all_omit) {
-  print(id)
-  play_df_frame <- play_df %>% filter(frameId == 26) %>% filter(nflId == id | type == 'ball')
-  pred_df_frame <- pred_df %>% filter(frameId == 26, omit == id)
-  p <- ggplot() + geom_tile(data = pred_df_frame, aes(x = x, y = y, fill = prob), width = 10, height = 10) +
-    scale_fill_gradient(low = "white", high = "brown1", limits = c(0, 1)) + 
-    geom_point(data = play_df_frame, aes(x = x, y = y, size = type, color = type, shape = type))  +
-    scale_shape_manual(values = c(20, 18, 18)) +
-    scale_size_manual(values = c(1, 2, 2)) +
-    scale_color_manual(values = c("grey", "cornflowerblue", "lightseagreen")) +
-        geom_vline(aes(xintercept = seq(round_any(min_x, 5, f = floor), 
-                                      round_any(max_x, 5, f = ceiling), by = 5)), 
-                 color = 'grey') +
-      geom_segment(aes(x = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
-                       y = rep(70.9 / 3 - 0.5, length(seq(round_any(min_x, 5, f = floor), 
-                                                             round_any(max_x, 5, f = ceiling), by = 1 )) ), 
-                       xend = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
-                       yend = rep(70.9 / 3 + 0.5, length(seq(round_any(min_x, 5, f = floor), 
-                                                             round_any(max_x, 5, f = ceiling), by = 1 ))) ), 
-                   color = 'grey') +
-      geom_segment(aes(x = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
-                       y = rep(70.8 / 3 + 18.5 / 3 - 0.5, length(seq(round_any(min_x, 5, f = floor), 
-                                                             round_any(max_x, 5, f = ceiling), by = 1 )) ), 
-                       xend = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
-                       yend = rep(70.8 / 3 + 18.5 / 3 + 0.5, length(seq(round_any(min_x, 5, f = floor), 
-                                                             round_any(max_x, 5, f = ceiling), by = 1 ))) ), 
-                   color = 'grey') + ylab("") + xlab("") + 
-    geom_hline(yintercept = 0, color = 'grey')  + geom_hline(yintercept = 54, color = 'grey') + geom_vline(xintercept = 0, color = 'grey') + 
-    geom_vline(xintercept = 120, color = 'grey') + xlim(0, 120) + ylim(0, 54) + theme_void() + theme(legend.position = "none") + ggtitle(id)
-  plot_list[[iter]] <- p
-  iter = iter+1
-}
-arranged_plots <- ggarrange(plotlist = plot_list, ncol = 4, nrow = 5)
-annotate_figure(arranged_plots, top = text_grob("Tackle Probability Added",  face = "bold", size = 14))
+pred_df <- read.csv(paste0("/Users/nickbachelder/Desktop/Personal Code/Kaggle/Tackles/", game_id, "_", play_id, ".csv")) %>% dplyr::select(-X) %>% 
+        mutate(x = as.numeric(x) + 2.5, y = as.numeric(y) + 2.5) 
+
+pred_df %>% filter(omit != 0)
 ```
+
+
 
 
 

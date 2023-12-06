@@ -39,16 +39,6 @@ def_ids = def_df.nflId.unique()
 model = TackleNetEnsemble(num_models = 10, N = 5)
 
  # Predict original
-original = play_object.predict_tackle_distribution(model = model)
-original['omit'] = 0
-
-# Predict with omissions
-
-all_pred = [original]
-for id in tqdm(def_ids):
-    w_omission = play_object.predict_tackle_distribution(model = model, without_player_id = id)
-    w_omission['omit'] = id
-    all_pred.append(w_omission)
-all_pred = pd.concat(all_pred, axis = 0)
+all_pred = play_object.get_contribution_matricies(model = model, to_df = True)
 all_pred.to_csv(f"{game_id}_{play_id}.csv")
     
