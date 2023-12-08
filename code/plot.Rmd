@@ -41,8 +41,8 @@ plot_marginal_contribution <- function(game_id, play_id) {
       mutate(x = as.numeric(x), y = as.numeric(y))
   pred_no_original <- pred_df %>% filter(omit != 0)
   all_frames <- unique(pred_no_original$frameId)
-  max_prob <- max(pred_no_original$prob)
-  min_prob <- min(pred_no_original$prob)
+  max_prob <- max(pred_no_original$upper)
+  min_prob <- min(pred_no_original$lower)
   saveGIF({for (i in 24:max(all_frames)) {
     pred_df_frame <- pred_no_original %>% filter(frameId == i)
     p <- pred_df_frame %>% dplyr::select(-y) %>% group_by(omit, x) %>% dplyr::summarise(lower = sum(lower), upper = sum(upper), prob = sum(prob)) %>% ungroup() %>% 
