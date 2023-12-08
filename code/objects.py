@@ -322,49 +322,6 @@ class imageCache:
                     continue
                 self.cache.update({f"{row.gameId}_{row.playId}" : image})
 
-def update(frame_id, dataframe, surf):
-    ax.clear()
-
-    center_density = dataframe.loc[dataframe.prob == max(dataframe.prob)][['x', 'y']]
-    center_x, center_y = center_density.x.reset_index(drop=1)[0], center_density.y.reset_index(drop=1)[0]
-    dataframe_now = dataframe.query(
-        "(x > @center_x - 40) & (x < @center_x + 40) & (y > @center_y - 20) & (y < @center_y + 20) & (frameId == @frame_id)")
-
-    fx = sorted(dataframe_now['x'].unique())
-    fy = sorted(dataframe_now['y'].unique())
-    z, zerror_lower, zerror_upper = [], [], []
-
-    for y_val in fy:
-        row_data, error_lower_data, error_upper_data = [], [], []
-
-        for x_val in fx:
-            subset = dataframe_now[(dataframe_now['x'] == x_val) & (dataframe_now['y'] == y_val)]
-            row_data.append(subset['prob'].values[0])
-            error_lower_data.append(subset['lower'].values[0])
-            error_upper_data.append(subset['upper'].values[0])
-
-        z.append(row_data)
-        zerror_lower.append(error_lower_data)
-        zerror_upper.append(error_upper_data)
-
-    x, y = np.meshgrid(fx, fy)
-
-    surf = ax.scatter3D(x, y, z, c=z, cmap="Reds", s=300, edgecolors="black", linewidth=0.5, marker="o", label='')
-
-    ax.set_xlabel('x')
-    ax.set_ylabel('y')
-    ax.set_zlabel('End of Play Probability')
-    ax.set_title('Tackle Probability with Prediction Interval')
-    ax.view_init(30, 300)
-    ax.set_zlim([0, 1])
-
-    for i in range(len(fy)):
-        for xval, yval, zval, zerr_lower, zerr_upper in zip(x[i], y[i], z[i], zerror_lower[i], zerror_upper[i]):
-            ax.plot([xval, xval], [yval, yval], [zerr_upper, zerr_lower], marker="_", color='k', label = '')
-    ax.set_box_aspect([2, 1, 1])
-
-    return surf
-
 
                 
 
