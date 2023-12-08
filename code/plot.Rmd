@@ -38,15 +38,16 @@ play_id = 2007
 
 plot_marginal_contribution <- function(game_id, play_id) {
   pred_df <- read.csv(paste0("/Users/nickbachelder/Desktop/Personal Code/Kaggle/Tackles/", game_id, "_", play_id, ".csv")) %>% dplyr::select(-X) %>%
-      mutate(x = as.numeric(x), y = as.numeric(y)) %>% filter(type == "expected")
+      mutate(x = as.numeric(x), y = as.numeric(y))
   pred_no_original <- pred_df %>% filter(omit != 0)
   all_frames <- unique(pred_no_original$frameId)
   max_prob <- max(pred_no_original$prob)
   min_prob <- min(pred_no_original$prob)
   saveGIF({for (i in 24:max(all_frames)) {
     pred_df_frame <- pred_no_original %>% filter(frameId == i)
-    p <- pred_df_frame %>% dplyr::select(-y) %>% group_by(omit, x) %>% dplyr::summarise(prob = sum(prob)) %>% ungroup() %>% mutate(omit = as.factor(omit)) %>%
-      ggplot() + geom_line(aes(x = x, y = prob)) + facet_wrap(~omit, ncol = 1) + theme_void() +
+    p <- pred_df_frame %>% dplyr::select(-y) %>% group_by(omit, x) %>% dplyr::summarise(lower = sum(lower), upper = sum(upper), prob = sum(prob)) %>% ungroup() %>% 
+      mutate(omit = as.factor(omit)) %>%
+      ggplot() + geom_ribbon(aes(x = x, ymin = lower, ymax = upper), fill = "grey70") + geom_line(aes(x = x, y = prob)) + facet_wrap(~omit, ncol = 1) + theme_void() +
       theme(axis.title.x = element_text(),  axis.text.x = element_text(),  axis.ticks.x = element_line(), axis.title.y = element_text()) + ylim(min_prob, max_prob)
     print(p)
     print(paste0("Frame ", i))
@@ -56,7 +57,7 @@ plot_marginal_contribution <- function(game_id, play_id) {
 
 plot_play <- function(game_id, play_id) {
   pred_df <- read.csv(paste0("/Users/nickbachelder/Desktop/Personal Code/Kaggle/Tackles/", game_id, "_", play_id, ".csv")) %>% dplyr::select(-X) %>%
-      mutate(x = as.numeric(x), y = as.numeric(y)) %>% filter(type == "expected")
+      mutate(x = as.numeric(x), y = as.numeric(y))
   play_df <- tracking %>% filter(gameId == game_id, playId == play_id) %>%
       dplyr::mutate(type = case_when(position %in% c("QB", "TE",  "WR", "G", "OLB", "RB", "C", "FB") ~ "offense", 
                                is.na(nflId) ~ "ball",
@@ -138,7 +139,7 @@ plot_features <- function(game_id, play_id) {
 
 plot_combine_play_contribution <- function(game_id, play_id) {
     pred_df <- read.csv(paste0("/Users/nickbachelder/Desktop/Personal Code/Kaggle/Tackles/", game_id, "_", play_id, ".csv")) %>% dplyr::select(-X) %>%
-      mutate(x = as.numeric(x), y = as.numeric(y)) %>% filter(type == "expected")
+      mutate(x = as.numeric(x), y = as.numeric(y))
     play_df <- tracking %>% filter(gameId == game_id, playId == play_id) %>%
       dplyr::mutate(type = case_when(position %in% c("QB", "TE",  "WR", "G", "OLB", "RB", "C", "FB") ~ "offense", 
                                is.na(nflId) ~ "ball",
@@ -224,7 +225,7 @@ plot_combine_play_contribution <- function(game_id, play_id) {
     },movie.name="facet_zoom_2.gif",ani.width = 600, ani.height = 600)
 }
 
-plot_combine_play_contribution(game_id, play_id)
+plot_marginal_contribution(game_id, play_id)
 ```
 
 

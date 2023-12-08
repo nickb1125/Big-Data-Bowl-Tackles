@@ -111,10 +111,12 @@ class play:
         outputs = outputs_all['overall_pred'].detach().numpy()
         lower = outputs_all['lower'].detach().numpy()
         upper = outputs_all['upper'].detach().numpy()
+        all_pred = outputs_all['all_pred'].detach().numpy()
         if marginal_x:
             outputs = np.sum(outputs, axis = 2)
             lower = np.sum(lower, axis = 2)
             upper = np.sum(upper, axis = 2)
+            all_pred = np.sum(all_pred, axis = 3) # dim = (prediction_type (3), frame, x (24), y (11))
         if to_df:
             exp_ret = array_to_field_dataframe(input_array=outputs, N=model.N, marginalized=marginal_x)
             exp_ret["type"] = "prob"
@@ -127,11 +129,12 @@ class play:
             ret['frameId'] = ret['frameId']+self.min_frame
             ret = ret.pivot(index=['x', 'y', 'frameId', 'omit'], columns='type', values='prob').reset_index()
             return ret
-        # Need to make functionality to return lower and upper when not a df
-        return outputs
+        return outputs, lower, upper, all_pred
     
     def get_contribution_matricies(self, model, to_df = True, marginal_x = False):
         original = self.predict_tackle_distribution(model=model, without_player_id = 0, to_df = False, marginal_x = marginal_x)
+        original_all_pred = original[3]
+
         # Predict ommissions
         def_df = self.refine_tracking(frame_id = self.min_frame)["Defense"]
         def_ids = def_df.nflId.unique()
@@ -141,14 +144,26 @@ class play:
             contribution_list = [original_df]
         for id in tqdm(def_ids):
             w_omission = self.predict_tackle_distribution(model = model, without_player_id = id, to_df = False, marginal_x=marginal_x)
-            contribution_mat = original-w_omission
+            w_omission_all_pred = w_omission[3]
+            contribution_mat_all_pred = original_all_pred-w_omission_all_pred
+            contribution_mat = np.mean(contribution_mat_all_pred, axis=0)
+            contribution_mat_lower = np.min(contribution_mat_all_pred, axis=0)
+            contribution_mat_upper = np.max(contribution_mat_all_pred, axis=0)
             if to_df:
-                contribution_df = array_to_field_dataframe(input_array=contribution_mat, N=model.N, marginalized = marginal_x)
+                contribution_df_exp = array_to_field_dataframe(input_array=contribution_mat, N=model.N, marginalized = marginal_x)
+                contribution_df_exp["type"] = "prob"
+                contribution_df_lower = array_to_field_dataframe(input_array=contribution_mat_lower, N=model.N, marginalized = marginal_x)
+                contribution_df_lower["type"] = "lower"
+                contribution_df_upper = array_to_field_dataframe(input_array=contribution_mat_upper, N=model.N, marginalized = marginal_x)
+                contribution_df_upper["type"] = "upper"
+                contribution_df = pd.concat([contribution_df_exp, contribution_df_lower, contribution_df_upper], axis = 0)
                 contribution_df['frameId'] = contribution_df['frameId']+self.min_frame+1
                 contribution_df['omit'] = id
+                contribution_df = contribution_df.pivot(index=['x', 'y', 'frameId', 'omit'], columns='type', values='prob').reset_index()
                 contribution_list.append(contribution_df)
+
                 continue
-            contribution_dict.update({id : contribution_mat})
+            contribution_dict.update({id : {"prob" : contribution_mat, "lower" : contribution_mat_lower, "upper" : contribution_mat_upper}})
         if to_df:
             return pd.concat(contribution_list, axis = 0)
         return contribution_dict
@@ -277,7 +292,7 @@ class TackleNetEnsemble:
         lower = torch.min(preds, axis = 0).values
         overall_pred = torch.mean(preds, axis = 0)
         upper = torch.max(preds, axis = 0).values
-        return {'overall_pred' : overall_pred, 'lower' : lower, 'upper' : upper}
+        return {'overall_pred' : overall_pred, 'lower' : lower, 'upper' : upper, 'all_pred' : preds}
     
 def array_to_field_dataframe(input_array, N, marginalized = False):
     pred_list=[]
@@ -295,32 +310,6 @@ def array_to_field_dataframe(input_array, N, marginalized = False):
                 pred_list.append(new_row)
     pred_df = pd.concat(pred_list, axis = 0)
     return pred_df
-
-class imageCache:
-
-    def __init__(self, N):
-        self.cache = dict()
-        self.N = N
-
-    def populate(self):
-        print("Loading neccecary data...")
-        print("--------------------------")
-        plays = pd.read_csv("data/nfl-big-data-bowl-2024/plays.csv")
-        tracking = pd.concat([pd.read_csv(f"data/nfl-big-data-bowl-2024/tracking_a_week_{week}.csv") for week in range(1, 10)])
-        plays = tracking[['gameId', 'playId', 'week']].drop_duplicates().merge(plays, how = 'left', on = ['gameId', 'playId'])
-
-        for week in range(1, 10):
-            print(f"Populating week {week}...")
-            print("--------------------------")
-            plays_week = plays.query("week == @week")
-            for index, row in tqdm(plays_week.iterrows()):
-                play_object = play(row.gameId, row.playId, tracking)
-                try:
-                    image = play_object.get_full_play_tackle_image(N=self.N)
-                except ValueError:
-                    print(f"Omitting play {row.gameId}_{row.playId} for incompleteness..")
-                    continue
-                self.cache.update({f"{row.gameId}_{row.playId}" : image})
 
 
                 
