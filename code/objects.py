@@ -15,7 +15,7 @@ import random
 import pickle
 
 class play:
-    def __init__(self, game_id, play_id, tracking, cache = dict()):
+    def __init__(self, game_id, play_id, tracking):
         self.game_id = game_id
         self.play_id = play_id
         self.tracking_df = tracking.query("gameId == @game_id & playId ==  @play_id")
@@ -23,7 +23,7 @@ class play:
         self.min_frame = min(self.tracking_df.frameId)
         self.num_frames = max(self.tracking_df.frameId)
         self.eop = self.get_end_of_play_location()
-        self.cache = cache
+        self.yardlines = np.array(self.tracking_df.query("displayName == 'football'").x)
 
     def get_end_of_play_location(self):
         end_of_play_carrier = self.tracking_df.query("nflId == @self.ball_carry_id & frameId == @self.num_frames")
@@ -50,10 +50,6 @@ class play:
                 for player_type in ["Offense", "Defense", "Carrier"]}
 
     def get_grid_features(self, frame_id, N, plot = False, without_player_id = 0):
-        if f"{self.game_id}_{self.play_id}" in self.cache.keys():
-            images_batch = self.cache[f"{self.game_id}_{self.play_id}"][without_player_id]
-            image_this_frame = images_batch.detach().numpy()[frame_id-self.min_frame, :, :, :]
-            return image_this_frame
 
         stratified_dfs = self.refine_tracking(frame_id = frame_id)
         off_df = stratified_dfs["Offense"]
@@ -104,42 +100,48 @@ class play:
             plt.show()
 
     def get_full_play_tackle_image(self, N, without_player_id = 0):
-        if f"{self.game_id}_{self.play_id}" in self.cache.keys():
-            images_batch = self.cache[f"{self.game_id}_{self.play_id}"][without_player_id]
-            return images_batch
         batch_images = torch.FloatTensor(np.array([
             self.get_grid_features(frame_id=i, N=N, without_player_id=without_player_id)
             for i in range(self.min_frame, self.num_frames+1)]))
         return batch_images
     
-    def predict_tackle_distribution(self, model, without_player_id = 0, to_df = True):
+    def predict_tackle_distribution(self, model, without_player_id = 0, to_df = True, marginal_x = False):
         batch_images = self.get_full_play_tackle_image(N = model.N, without_player_id=without_player_id)
-        outputs = model.predict_pdf(batch_images).detach().numpy()
+        outputs_all = model.predict_pdf(batch_images)
+        outputs = outputs_all['overall_pred'].detach().numpy()
+        lower = outputs_all['lower'].detach().numpy()
+        upper = outputs_all['upper'].detach().numpy()
+        if marginal_x:
+            outputs = np.sum(outputs, axis = 2)
+            lower = np.sum(lower, axis = 2)
+            upper = np.sum(upper, axis = 2)
         if to_df:
-            ret = array_to_field_dataframe(input_array=outputs, N=model.N)
+            exp_ret = array_to_field_dataframe(input_array=outputs, N=model.N, marginalized=marginal_x)
+            exp_ret["type"] = "prob"
+            lower_ret = array_to_field_dataframe(input_array=lower, N=model.N, marginalized=marginal_x)
+            lower_ret['type'] = "lower"
+            upper_ret = array_to_field_dataframe(input_array=upper, N=model.N, marginalized=marginal_x)
+            upper_ret['type'] = "upper"
+            ret = pd.concat([exp_ret, lower_ret, upper_ret], axis = 0)
+            ret['omit'] = without_player_id
             ret['frameId'] = ret['frameId']+self.min_frame
+            ret = ret.pivot(index=['x', 'y', 'frameId', 'omit'], columns='type', values='prob').reset_index()
             return ret
+        # Need to make functionality to return lower and upper when not a df
         return outputs
     
     def get_contribution_matricies(self, model, to_df = True, marginal_x = False):
-        original = self.predict_tackle_distribution(model=model, without_player_id = 0, to_df = False)
-        if marginal_x:
-            original = np.sum(original, axis = 2)
-
+        original = self.predict_tackle_distribution(model=model, without_player_id = 0, to_df = False, marginal_x = marginal_x)
         # Predict ommissions
         def_df = self.refine_tracking(frame_id = self.min_frame)["Defense"]
         def_ids = def_df.nflId.unique()
         contribution_dict = dict()
         if to_df:
-            original_df = self.predict_tackle_distribution(model=model, without_player_id = 0, to_df = True)
-            original_df['omit'] = 0
+            original_df = self.predict_tackle_distribution(model=model, without_player_id = 0, to_df = True, marginal_x = marginal_x)
             contribution_list = [original_df]
         for id in tqdm(def_ids):
-            w_omission = self.predict_tackle_distribution(model = model, without_player_id = id, to_df = False)
-            if marginal_x:
-                contribution_mat = np.sum(w_omission, axis = 2)
+            w_omission = self.predict_tackle_distribution(model = model, without_player_id = id, to_df = False, marginal_x=marginal_x)
             contribution_mat = original-w_omission
-            print(contribution_mat.shape)
             if to_df:
                 contribution_df = array_to_field_dataframe(input_array=contribution_mat, N=model.N, marginalized = marginal_x)
                 contribution_df['frameId'] = contribution_df['frameId']+self.min_frame+1
@@ -219,8 +221,6 @@ def get_player_movement_features(player_df, N):
 
 def get_player_field_densities(player_df, N):
     density_mat = np.zeros((len(list(range(0, 54, N))), len(list(range(0, 120, N)))))
-    x_mat = np.tile(np.arange(0, 120, N)+(N/2), (math.ceil(54/N), 1))
-    y_mat = np.transpose(np.tile(np.arange(0, 54, N)+(N/2), (math.ceil(120/N), 1)))
     for index, row in player_df.iterrows():
         x_rounded = math.floor(row.x / N)
         y_rounded = math.floor(row.y / N)
@@ -274,8 +274,10 @@ class TackleNetEnsemble:
             pred = model(image)
             preds.append(pred)
         preds = torch.stack(preds)
+        lower = torch.min(preds, axis = 0).values
         overall_pred = torch.mean(preds, axis = 0)
-        return overall_pred
+        upper = torch.max(preds, axis = 0).values
+        return {'overall_pred' : overall_pred, 'lower' : lower, 'upper' : upper}
     
 def array_to_field_dataframe(input_array, N, marginalized = False):
     pred_list=[]
@@ -312,17 +314,59 @@ class imageCache:
             print("--------------------------")
             plays_week = plays.query("week == @week")
             for index, row in tqdm(plays_week.iterrows()):
-                self.cache.update({f"{row.gameId}_{row.playId}" : dict()})
                 play_object = play(row.gameId, row.playId, tracking)
                 try:
-                    def_ids = play_object.refine_tracking(frame_id = play_object.min_frame)["Defense"].nflId.unique().tolist()
+                    image = play_object.get_full_play_tackle_image(N=self.N)
                 except ValueError:
                     print(f"Omitting play {row.gameId}_{row.playId} for incompleteness..")
                     continue
-                def_ids.append(0) # add no removal image
-                for id in def_ids:
-                    full_play_image = play_object.get_full_play_tackle_image(N=self.N, without_player_id = id)
-                    self.cache[f"{row.gameId}_{row.playId}"].update({id : full_play_image})
+                self.cache.update({f"{row.gameId}_{row.playId}" : image})
+
+def update(frame_id, dataframe, surf):
+    ax.clear()
+
+    center_density = dataframe.loc[dataframe.prob == max(dataframe.prob)][['x', 'y']]
+    center_x, center_y = center_density.x.reset_index(drop=1)[0], center_density.y.reset_index(drop=1)[0]
+    dataframe_now = dataframe.query(
+        "(x > @center_x - 40) & (x < @center_x + 40) & (y > @center_y - 20) & (y < @center_y + 20) & (frameId == @frame_id)")
+
+    fx = sorted(dataframe_now['x'].unique())
+    fy = sorted(dataframe_now['y'].unique())
+    z, zerror_lower, zerror_upper = [], [], []
+
+    for y_val in fy:
+        row_data, error_lower_data, error_upper_data = [], [], []
+
+        for x_val in fx:
+            subset = dataframe_now[(dataframe_now['x'] == x_val) & (dataframe_now['y'] == y_val)]
+            row_data.append(subset['prob'].values[0])
+            error_lower_data.append(subset['lower'].values[0])
+            error_upper_data.append(subset['upper'].values[0])
+
+        z.append(row_data)
+        zerror_lower.append(error_lower_data)
+        zerror_upper.append(error_upper_data)
+
+    x, y = np.meshgrid(fx, fy)
+
+    surf = ax.scatter3D(x, y, z, c=z, cmap="Reds", s=300, edgecolors="black", linewidth=0.5, marker="o", label='')
+
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    ax.set_zlabel('End of Play Probability')
+    ax.set_title('Tackle Probability with Prediction Interval')
+    ax.view_init(30, 300)
+    ax.set_zlim([0, 1])
+
+    for i in range(len(fy)):
+        for xval, yval, zval, zerr_lower, zerr_upper in zip(x[i], y[i], z[i], zerror_lower[i], zerror_upper[i]):
+            ax.plot([xval, xval], [yval, yval], [zerr_upper, zerr_lower], marker="_", color='k', label = '')
+    ax.set_box_aspect([2, 1, 1])
+
+    return surf
+
+
+                
 
 
 

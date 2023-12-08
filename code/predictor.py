@@ -12,8 +12,11 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 import random
-from objects import play, TackleAttemptDataset, TackleNet, plot_predictions, TackleNetEnsemble
+from objects import play, TackleAttemptDataset, TackleNet, plot_predictions, TackleNetEnsemble, update
 import pickle
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+from matplotlib.animation import FuncAnimation
 
 game_id = 2022100212
 play_id = 2007
@@ -38,7 +41,28 @@ def_ids = def_df.nflId.unique()
 
 model = TackleNetEnsemble(num_models = 10, N = 5)
 
- # Predict original
-all_pred = play_object.get_contribution_matricies(model = model, to_df = True)
+all_pred = play_object.get_contribution_matricies(model = model, to_df = True, marginal_x=False)
 all_pred.to_csv(f"{game_id}_{play_id}.csv")
-    
+
+
+
+### plot 3d predictions with prediction interval
+
+# Set up the initial figure
+fig = plt.figure(figsize=(10, 10))
+ax = fig.add_subplot(projection='3d')
+
+# Dummy scatter plot to generate legend
+surf = ax.scatter([], [], [], c=[], cmap="Reds", s=300, edgecolors="black", linewidth=0.5, marker="o", label='Legend Label')
+
+# Set label='' to prevent automatic legend creation
+ax.legend()
+
+# Set the specific frames you want to animate (frames 25 through 30)
+frames_to_animate = pred_df.frameId.unique()
+
+# Create the animation
+animation = FuncAnimation(fig, update, frames=frames_to_animate, fargs=(pred_df, surf))
+
+# Save the animation as a GIF
+animation.save('animation.gif', writer='pillow', fps=10)

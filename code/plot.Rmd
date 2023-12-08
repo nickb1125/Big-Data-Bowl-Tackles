@@ -31,16 +31,114 @@ tackles <- read.csv(here::here("data/nfl-big-data-bowl-2024/tackles.csv"))
 tracking <- do.call(rbind, lapply(seq(1, 9), function(week) {read.csv(here::here(paste0("data/nfl-big-data-bowl-2024/tracking_a_week_", week, ".csv")))}))
 ```
 
+
 ```{r}
-plot_play <- function(game_id, play_id, pred = TRUE, contribution_only = FALSE) {
-  if (contribution_only==FALSE) {
-    print("--------------------")
-    print('Getting overall play GIF')
-    print("--------------------")
-    if (pred == TRUE) {
-      pred_df <- read.csv(paste0("/Users/nickbachelder/Desktop/Personal Code/Kaggle/Tackles/", game_id, "_", play_id, ".csv")) %>% dplyr::select(-X) %>% 
-        mutate(x = as.numeric(x) + 2.5, y = as.numeric(y) + 2.5) 
-    }
+game_id = 2022100212
+play_id = 2007
+
+plot_marginal_contribution <- function(game_id, play_id) {
+  pred_df <- read.csv(paste0("/Users/nickbachelder/Desktop/Personal Code/Kaggle/Tackles/", game_id, "_", play_id, ".csv")) %>% dplyr::select(-X) %>%
+      mutate(x = as.numeric(x), y = as.numeric(y)) %>% filter(type == "expected")
+  pred_no_original <- pred_df %>% filter(omit != 0)
+  all_frames <- unique(pred_no_original$frameId)
+  max_prob <- max(pred_no_original$prob)
+  min_prob <- min(pred_no_original$prob)
+  saveGIF({for (i in 24:max(all_frames)) {
+    pred_df_frame <- pred_no_original %>% filter(frameId == i)
+    p <- pred_df_frame %>% dplyr::select(-y) %>% group_by(omit, x) %>% dplyr::summarise(prob = sum(prob)) %>% ungroup() %>% mutate(omit = as.factor(omit)) %>%
+      ggplot() + geom_line(aes(x = x, y = prob)) + facet_wrap(~omit, ncol = 1) + theme_void() +
+      theme(axis.title.x = element_text(),  axis.text.x = element_text(),  axis.ticks.x = element_line(), axis.title.y = element_text()) + ylim(min_prob, max_prob)
+    print(p)
+    print(paste0("Frame ", i))
+    ani.pause()}
+    },movie.name="facet_zoom_2.gif",ani.width = 600, ani.height = 600)
+}
+
+plot_play <- function(game_id, play_id) {
+  pred_df <- read.csv(paste0("/Users/nickbachelder/Desktop/Personal Code/Kaggle/Tackles/", game_id, "_", play_id, ".csv")) %>% dplyr::select(-X) %>%
+      mutate(x = as.numeric(x), y = as.numeric(y)) %>% filter(type == "expected")
+  play_df <- tracking %>% filter(gameId == game_id, playId == play_id) %>%
+      dplyr::mutate(type = case_when(position %in% c("QB", "TE",  "WR", "G", "OLB", "RB", "C", "FB") ~ "offense", 
+                               is.na(nflId) ~ "ball",
+                               TRUE ~ "defense"))
+    describe <- (plays %>% filter(gameId == game_id, playId == play_id))$playDescription[1]
+    all_frames <- unique(play_df$frameId)
+    max_p <- max(pred_df$prob)
+    oopt = ani.options(interval = 1/10)
+    saveGIF({for (i in min(all_frames):max(all_frames)) {
+      play_df_frame <- play_df %>% filter(frameId == i)
+      pred_df_frame <- pred_df %>% filter(frameId == i, omit == 0) 
+      min_x = 10
+      max_x = 110
+      min_y = 0
+      max_y = 54
+      main <- ggplot() + geom_tile(data = pred_df_frame, aes(x = x, y = y, fill = prob), width = 10, height = 10)
+      main <- main +
+        scale_fill_gradient(low = "grey", high = "brown1", limits = c(0, max_p)) +
+            geom_vline(aes(xintercept = seq(round_any(min_x, 5, f = floor), 
+                                          round_any(max_x, 5, f = ceiling), by = 5)), 
+                     color = 'white') +
+          geom_segment(aes(x = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
+                           y = rep(70.9 / 3 - 0.5, length(seq(round_any(min_x, 5, f = floor), 
+                                                                 round_any(max_x, 5, f = ceiling), by = 1 )) ), 
+                           xend = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
+                           yend = rep(70.9 / 3 + 0.5, length(seq(round_any(min_x, 5, f = floor), 
+                                                                 round_any(max_x, 5, f = ceiling), by = 1 ))) ), 
+                       color = 'white') +
+          geom_segment(aes(x = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
+                           y = rep(70.8 / 3 + 18.5 / 3 - 0.5, length(seq(round_any(min_x, 5, f = floor), 
+                                                                 round_any(max_x, 5, f = ceiling), by = 1 )) ), 
+                           xend = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
+                           yend = rep(70.8 / 3 + 18.5 / 3 + 0.5, length(seq(round_any(min_x, 5, f = floor), 
+                                                                 round_any(max_x, 5, f = ceiling), by = 1 ))) ), 
+                       color = 'white') + ylab("") + xlab("") + 
+        geom_hline(yintercept = 0, color = 'white')  + geom_hline(yintercept = 54, color = 'white') + geom_vline(xintercept = 0, color = 'white') + 
+        geom_vline(xintercept = 120, color = 'white')  + 
+        geom_point(data = play_df_frame, aes(x = x, y = y, size = type, color = type, shape = type))  +
+        scale_shape_manual(values = c(20, 18, 18)) +
+        scale_size_manual(values = c(2, 5, 5)) +
+        scale_color_manual(values = c("white", "cornflowerblue", "lightseagreen")) +
+        labs(title = "Tackle Classifier Example", x = "", y = "", caption = describe) + xlim(0, 120) + ylim(0, 54) + theme_minimal() 
+    print(main)
+    print(paste0("Frame ", i))
+    ani.pause()}
+    },movie.name="facet_zoom_2.gif",ani.width = 600, ani.height = 600)
+}
+
+plot_features <- function(game_id, play_id) {
+  features <- read.csv(paste0("/Users/nickbachelder/Desktop/Personal Code/Kaggle/Tackles/features_", game_id, "_", play_id, ".csv")) %>% 
+      dplyr::select(-X) %>% pivot_longer(cols = !c(x, y, frameId)) 
+    
+    oopt = ani.options(interval = 1/10)
+    saveGIF({for (i in 1:(max(features$frameId)-1)) {
+      image_this_frame <- features %>% filter(frameId == i) 
+      plots_list <- list()
+      # Iterate over unique feature names and create heat maps
+      for (feature_name in unique(image_this_frame$name)) {
+        feature_data <- subset(image_this_frame, name == feature_name)
+        
+        # Create a ggplot for each feature
+        plot <- ggplot(feature_data, aes(x = x, y = y, fill = value)) +
+          geom_tile() +
+          ggtitle(feature_name) +
+          scale_fill_gradient2(low = "mediumpurple1", mid = 'azure1', high = "red", midpoint = 0) + 
+          guides(fill="none") + theme_void() + xlab("") + ylab("")  # Adjust the color scale as needed
+        
+        # Append the plot to the list
+        plots_list[[feature_name]] <- plot
+      }
+      
+      # Arrange the plots using ggarrange
+      p <- ggarrange(plotlist = plots_list, ncol = 3, nrow = 4)
+      print(p)
+      print(paste0(i, " out of ", max(features$frameId) - 1))
+      ani.pause()}
+    }, movie.name="facet_zoom.gif",ani.width = 600, ani.height = 300)
+}
+
+plot_combine_play_contribution <- function(game_id, play_id) {
+    pred_df <- read.csv(paste0("/Users/nickbachelder/Desktop/Personal Code/Kaggle/Tackles/", game_id, "_", play_id, ".csv")) %>% dplyr::select(-X) %>%
+      mutate(x = as.numeric(x), y = as.numeric(y)) %>% filter(type == "expected")
     play_df <- tracking %>% filter(gameId == game_id, playId == play_id) %>%
       dplyr::mutate(type = case_when(position %in% c("QB", "TE",  "WR", "G", "OLB", "RB", "C", "FB") ~ "offense", 
                                is.na(nflId) ~ "ball",
@@ -51,19 +149,12 @@ plot_play <- function(game_id, play_id, pred = TRUE, contribution_only = FALSE) 
     oopt = ani.options(interval = 1/10)
     saveGIF({for (i in min(all_frames):max(all_frames)) {
       play_df_frame <- play_df %>% filter(frameId == i)
-      if (pred == TRUE) {
-        pred_df_frame <- pred_df %>% filter(frameId == i, omit == 0) 
-      }
+      pred_df_frame <- pred_df %>% filter(frameId == i, omit == 0) 
       min_x = 10
       max_x = 110
       min_y = 0
       max_y = 54
-      if (pred == TRUE) {
-        main <- ggplot() + geom_tile(data = pred_df_frame, aes(x = x, y = y, fill = prob), width = 10, height = 10)
-      }
-      else {
-        main <- ggplot()
-      }
+      main <- ggplot() + geom_tile(data = pred_df_frame, aes(x = x, y = y, fill = prob), width = 10, height = 10)
       main <- main +
         scale_fill_gradient(low = "grey", high = "brown1", limits = c(0, max_p)) +
             geom_vline(aes(xintercept = seq(round_any(min_x, 5, f = floor), 
@@ -131,87 +222,12 @@ plot_play <- function(game_id, play_id, pred = TRUE, contribution_only = FALSE) 
       print(paste0("Frame ", i))
       ani.pause()}
     },movie.name="facet_zoom_2.gif",ani.width = 600, ani.height = 600)
-  }
-  if (pred==TRUE) {
-    features <- read.csv(paste0("/Users/nickbachelder/Desktop/Personal Code/Kaggle/Tackles/features_", game_id, "_", play_id, ".csv")) %>% 
-      dplyr::select(-X) %>% pivot_longer(cols = !c(x, y, frameId)) 
-    
-    oopt = ani.options(interval = 1/10)
-    saveGIF({for (i in 1:(max(features$frameId)-1)) {
-      image_this_frame <- features %>% filter(frameId == i) 
-      plots_list <- list()
-      # Iterate over unique feature names and create heat maps
-      for (feature_name in unique(image_this_frame$name)) {
-        feature_data <- subset(image_this_frame, name == feature_name)
-        
-        # Create a ggplot for each feature
-        plot <- ggplot(feature_data, aes(x = x, y = y, fill = value)) +
-          geom_tile() +
-          ggtitle(feature_name) +
-          scale_fill_gradient2(low = "mediumpurple1", mid = 'azure1', high = "red", midpoint = 0) + 
-          guides(fill="none") + theme_void() + xlab("") + ylab("")  # Adjust the color scale as needed
-        
-        # Append the plot to the list
-        plots_list[[feature_name]] <- plot
-      }
-      
-      # Arrange the plots using ggarrange
-      p <- ggarrange(plotlist = plots_list, ncol = 3, nrow = 4)
-      print(p)
-      print(paste0(i, " out of ", max(features$frameId) - 1))
-      ani.pause()}
-    }, movie.name="facet_zoom.gif",ani.width = 600, ani.height = 300)
-  }
 }
+
+plot_combine_play_contribution(game_id, play_id)
 ```
 
-```{r}
-plot_play(game_id=2022100212, play_id=2007, pred = TRUE, contribution_only = FALSE)
-```
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-```{r}
-game_id = 2022100212
-play_id = 2007
-
-pred_df <- read.csv(paste0("/Users/nickbachelder/Desktop/Personal Code/Kaggle/Tackles/", game_id, "_", play_id, ".csv")) %>% dplyr::select(-X) %>%
-      mutate(x = as.numeric(x), y = as.numeric(y))
-
-
-pred_df %>% filter(frameId == 24, omit != 0)
-pred_df$omit %>% unique()
-```
 
 
 

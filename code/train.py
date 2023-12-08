@@ -23,7 +23,7 @@ test_dataloader = DataLoader(test_dataset, batch_size=64, shuffle=True)
 criterion = nn.BCELoss()
 
 # Train bagged models
-for bag in range(10):
+for bag in range(100):
     with open(f'data/tackle_images_5_output_5_bag_{bag}_stratified.pkl', 'rb') as f:
         tackle_dataset = pickle.load(f)
 

@@ -12,7 +12,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 import random
-from objects import play, TackleAttemptDataset, TackleNet, plot_predictions
+from objects import play, TackleAttemptDataset, TackleNet, plot_predictions, imageCache
 import pickle
 
 print("Loading base data")
@@ -31,6 +31,8 @@ test_games = tracking.query("week == 9").gameId.unique()
 test_plays = plays.query("(gameId in @test_games)")
 train_val_games = tracking.query("week != 9").gameId.unique()
 train_val_plays = plays.query("gameId in @train_val_games")
+with open(f'data/image_cache_5.pkl', 'rb') as f:
+    image_cache = pickle.load(f)
 
 if load_test:
     print("Getting test images (all frames)....")
@@ -43,7 +45,7 @@ if load_test:
     frame_ids = []
     for row in tqdm(range(test_plays.shape[0])):
         play_row = test_plays.iloc[row,]
-        play_object = play(play_row.gameId, play_row.playId, tracking)
+        play_object = play(play_row.gameId, play_row.playId, tracking, image_cache)
         frame_id = random.randint(play_object.min_frame, play_object.num_frames)
         play_ids.append(play_row.playId)
         frame_ids.append(frame_id)
@@ -72,14 +74,14 @@ images = []
 labels = []
 play_ids = []
 frame_ids = []
-for bag in range(10):
+for bag in range(100):
     print(f"COMPLETING BAG {bag}....")
     # Choose random frame from each play
     images = []
     labels = []
     for row in tqdm(range(train_val_plays.shape[0])):
         play_row = train_val_plays.iloc[row,]
-        play_object = play(play_row.gameId, play_row.playId, tracking)
+        play_object = play(play_row.gameId, play_row.playId, tracking, image_cache)
         frame_id = random.randint(play_object.min_frame, play_object.num_frames)
         play_ids.append(play_row.playId)
         frame_ids.append(frame_id)
