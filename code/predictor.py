@@ -41,7 +41,7 @@ def_ids = def_df.nflId.unique()
 
 model = TackleNetEnsemble(num_models = 10, N = 5)
 
-all_pred = play_object.get_contribution_matricies(model = model, to_df = True, marginal_x=False)
+all_pred = play_object.get_plot_df(model = model)
 all_pred.to_csv(f"{game_id}_{play_id}.csv")
 
 

@@ -13,6 +13,19 @@ from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 import random
 import pickle
+from scipy.stats import norm
+
+def calculate_expected_from_vec(marginalized_probs):
+    field_array = np.array(range(0, 120, 5))+2.5
+    expected_saved = sum(marginalized_probs*field_array)
+    return expected_saved
+
+def calculate_expected_from_mat(marginalized_probs_mat):
+    contribution_array = np.apply_along_axis(calculate_expected_from_vec, axis=2, arr=marginalized_probs_mat)
+    estimate = np.mean(contribution_array, axis=0)
+    lower = np.percentile(contribution_array, q=2.5, axis=0)
+    upper = np.percentile(contribution_array, q=97.5, axis=0)
+    return {"estimate": estimate, "lower": lower, "upper": upper}
 
 class play:
     def __init__(self, game_id, play_id, tracking):
@@ -23,7 +36,7 @@ class play:
         self.min_frame = min(self.tracking_df.frameId)
         self.num_frames = max(self.tracking_df.frameId)
         self.eop = self.get_end_of_play_location()
-        self.yardlines = np.array(self.tracking_df.query("displayName == 'football'").x)
+        self.yardlines = np.array(self.tracking_df.query("displayName == 'football'").sort_values(by='frameId').x)
 
     def get_end_of_play_location(self):
         end_of_play_carrier = self.tracking_df.query("nflId == @self.ball_carry_id & frameId == @self.num_frames")
@@ -117,57 +130,66 @@ class play:
             lower = np.sum(lower, axis = 2)
             upper = np.sum(upper, axis = 2)
             all_pred = np.sum(all_pred, axis = 3) # dim = (prediction_type (3), frame, x (24), y (11))
-        if to_df:
-            exp_ret = array_to_field_dataframe(input_array=outputs, N=model.N, marginalized=marginal_x)
-            exp_ret["type"] = "prob"
-            lower_ret = array_to_field_dataframe(input_array=lower, N=model.N, marginalized=marginal_x)
-            lower_ret['type'] = "lower"
-            upper_ret = array_to_field_dataframe(input_array=upper, N=model.N, marginalized=marginal_x)
-            upper_ret['type'] = "upper"
-            ret = pd.concat([exp_ret, lower_ret, upper_ret], axis = 0)
-            ret['omit'] = without_player_id
-            ret['frameId'] = ret['frameId']+self.min_frame
-            ret = ret.pivot(index=['x', 'y', 'frameId', 'omit'], columns='type', values='prob').reset_index()
-            return ret
-        return outputs, lower, upper, all_pred
+        return {'estimate' : outputs, 'lower' : lower, 'upper' : upper, 'all' : all_pred}
     
-    def get_contribution_matricies(self, model, to_df = True, marginal_x = False):
-        original = self.predict_tackle_distribution(model=model, without_player_id = 0, to_df = False, marginal_x = marginal_x)
-        original_all_pred = original[3]
+    def get_expected_eop(self, model, omit = 0):
+        original = self.predict_tackle_distribution(model=model, without_player_id = omit, to_df = False, marginal_x = True)['all']
+        expected_dict = calculate_expected_from_mat(original)
+        return expected_dict
+    
+    def get_expected_contribution(self, model, player_id, original_all_pred):
+        w_omission_all_pred = self.predict_tackle_distribution(model=model, without_player_id = player_id, to_df = False, marginal_x = True)['all']
+        contribution_mat_all_pred = original_all_pred-w_omission_all_pred
+        contribution_dict = calculate_expected_from_mat(contribution_mat_all_pred)
+        return contribution_dict
+    
+    def get_plot_df(self, model):
+        # Get df from original (i.e. no player replacement)
+        original = self.predict_tackle_distribution(model=model, without_player_id = 0, to_df = False)
+        original_exp_eop = self.get_expected_eop(model, omit = 0)
+        outputs, lower, upper = original['estimate'], original['lower'], original['upper']
+        exp_eop, lower_exp_eop, upper_exp_eop = original_exp_eop['estimate'], original_exp_eop['lower'], original_exp_eop['upper']
+        exp_contribution, lower_contribution, upper_contribution = np.zeros(len(range(self.min_frame, self.num_frames+1))), np.zeros(len(range(self.min_frame, self.num_frames+1))), np.zeros(len(range(self.min_frame, self.num_frames+1)))
+        exp_ret = array_to_field_dataframe(input_array=outputs, N=model.N, marginalized=False)
+        exp_ret["type"] = "prob"
+        lower_ret = array_to_field_dataframe(input_array=lower, N=model.N, marginalized=False)
+        lower_ret['type'] = "lower"
+        upper_ret = array_to_field_dataframe(input_array=upper, N=model.N, marginalized=False)
+        upper_ret['type'] = "upper"
+        ret_tackle_probs = pd.concat([exp_ret, lower_ret, upper_ret], axis = 0)
+        ret_tackle_probs['omit'] = 0
+        ret_tackle_probs['frameId'] = ret_tackle_probs['frameId']+self.min_frame
+        ret_tackle_probs = ret_tackle_probs.pivot(index=['x', 'y', 'frameId', 'omit'], columns='type', values='prob').reset_index()
+        ret_contribution = pd.DataFrame({"frameId" : range(self.min_frame, self.num_frames+1), "exp_eop" : exp_eop, "lower_exp_eop" : lower_exp_eop, "upper_exp_eop" : upper_exp_eop,
+                                         "exp_contribution" : exp_contribution, "lower_contribution" : lower_contribution, "upper_contribution" : upper_contribution})
+        ret = ret_tackle_probs.merge(ret_contribution, how = "left", on = "frameId")
 
+        output_list = [ret]
         # Predict ommissions
         def_df = self.refine_tracking(frame_id = self.min_frame)["Defense"]
         def_ids = def_df.nflId.unique()
-        contribution_dict = dict()
-        if to_df:
-            original_df = self.predict_tackle_distribution(model=model, without_player_id = 0, to_df = True, marginal_x = marginal_x)
-            contribution_list = [original_df]
         for id in tqdm(def_ids):
-            w_omission = self.predict_tackle_distribution(model = model, without_player_id = id, to_df = False, marginal_x=marginal_x)
-            w_omission_all_pred = w_omission[3]
-            contribution_mat_all_pred = original_all_pred-w_omission_all_pred
-            contribution_mat = np.mean(contribution_mat_all_pred, axis=0)
-            contribution_mat_lower = np.min(contribution_mat_all_pred, axis=0)
-            contribution_mat_upper = np.max(contribution_mat_all_pred, axis=0)
-            if to_df:
-                contribution_df_exp = array_to_field_dataframe(input_array=contribution_mat, N=model.N, marginalized = marginal_x)
-                contribution_df_exp["type"] = "prob"
-                contribution_df_lower = array_to_field_dataframe(input_array=contribution_mat_lower, N=model.N, marginalized = marginal_x)
-                contribution_df_lower["type"] = "lower"
-                contribution_df_upper = array_to_field_dataframe(input_array=contribution_mat_upper, N=model.N, marginalized = marginal_x)
-                contribution_df_upper["type"] = "upper"
-                contribution_df = pd.concat([contribution_df_exp, contribution_df_lower, contribution_df_upper], axis = 0)
-                contribution_df['frameId'] = contribution_df['frameId']+self.min_frame+1
-                contribution_df['omit'] = id
-                contribution_df = contribution_df.pivot(index=['x', 'y', 'frameId', 'omit'], columns='type', values='prob').reset_index()
-                contribution_list.append(contribution_df)
-
-                continue
-            contribution_dict.update({id : {"prob" : contribution_mat, "lower" : contribution_mat_lower, "upper" : contribution_mat_upper}})
-        if to_df:
-            return pd.concat(contribution_list, axis = 0)
-        return contribution_dict
-                
+            original = self.predict_tackle_distribution(model=model, without_player_id = id, to_df = False)
+            original_exp_eop = self.get_expected_eop(model, omit = id)
+            original_contribution = self.get_expected_contribution(model, player_id = id)
+            outputs, lower, upper = original['estimate'], original['lower'], original['upper']
+            exp_eop, lower_exp_eop, upper_exp_eop = original_exp_eop['estimate'], original_exp_eop['lower'], original_exp_eop['upper']
+            exp_contribution, lower_contribution, upper_contribution = original_contribution['estimate'], original_contribution['lower'], original_contribution['upper']
+            exp_ret = array_to_field_dataframe(input_array=outputs, N=model.N, marginalized=False)
+            exp_ret["type"] = "prob"
+            lower_ret = array_to_field_dataframe(input_array=lower, N=model.N, marginalized=False)
+            lower_ret['type'] = "lower"
+            upper_ret = array_to_field_dataframe(input_array=upper, N=model.N, marginalized=False)
+            upper_ret['type'] = "upper"
+            ret_tackle_probs = pd.concat([exp_ret, lower_ret, upper_ret], axis = 0)
+            ret_tackle_probs['omit'] = 0
+            ret_tackle_probs['frameId'] = ret_tackle_probs['frameId']+self.min_frame
+            ret_tackle_probs = ret_tackle_probs.pivot(index=['x', 'y', 'frameId', 'omit'], columns='type', values='prob').reset_index()
+            ret_contribution = pd.DataFrame({"frameId" : range(self.min_frame, self.num_frames+1), "exp_eop" : exp_eop, "lower_exp_eop" : lower_exp_eop, "upper_exp_eop" : upper_exp_eop,
+                                            "exp_contribution" : exp_contribution, "lower_contribution" : lower_contribution, "upper_contribution" : upper_contribution})
+            ret = ret_tackle_probs.merge(ret_contribution, how = "left", on = "frameId")
+            output_list.append(ret)
+        return pd.concat(output_list, axis = 0)
 
 
 class TackleAttemptDataset:
@@ -320,3 +342,10 @@ def array_to_field_dataframe(input_array, N, marginalized = False):
 
 
 
+### We can meausre:
+# (1) TackleEffect: Average expected yards saved by tackler over all plays over all time points
+# (2) TackleConsistency: Distributional variance of average estimateed tackle effect distribution
+# (3) TackleRisk: Average bimodalness of estimated tackle effect distribution
+
+### We can calculate confidence intervals for these using the sampling variance (i.e. standard errors)
+### of our CNN, as calculated through bagging samples.

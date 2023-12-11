@@ -31,8 +31,6 @@ test_games = tracking.query("week == 9").gameId.unique()
 test_plays = plays.query("(gameId in @test_games)")
 train_val_games = tracking.query("week != 9").gameId.unique()
 train_val_plays = plays.query("gameId in @train_val_games")
-with open(f'data/image_cache_5.pkl', 'rb') as f:
-    image_cache = pickle.load(f)
 
 if load_test:
     print("Getting test images (all frames)....")
@@ -45,7 +43,7 @@ if load_test:
     frame_ids = []
     for row in tqdm(range(test_plays.shape[0])):
         play_row = test_plays.iloc[row,]
-        play_object = play(play_row.gameId, play_row.playId, tracking, image_cache)
+        play_object = play(play_row.gameId, play_row.playId, tracking)
         frame_id = random.randint(play_object.min_frame, play_object.num_frames)
         play_ids.append(play_row.playId)
         frame_ids.append(frame_id)

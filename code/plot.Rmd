@@ -259,7 +259,40 @@ plot_marginal_contribution(game_id, play_id)
 
 
 
-```{r}
 
+```{r}
+contribution_df <- read.csv(here::here("data/contribution_df.csv"))
+
+cumulative_contribution_df <-  contribution_df %>% arrange(play_id) %>% group_by(nflId, displayName, position) %>% 
+  mutate(play_number = rank(play_id), cum_contribution = cumsum(estimated), 
+         avg_contribution= mean(cum_contribution),
+         final_cum_contribution = cum_contribution[play_number == max(play_number)]) %>% ungroup()
+
+eys_rank <- cumulative_contribution_df %>% dplyr::select(nflId, displayName, position, final_cum_contribution) %>% distinct() %>%
+  mutate(rank_cum_contribution = rank(-final_cum_contribution)) %>% dplyr::select(-final_cum_contribution) %>%
+  arrange(rank_cum_contribution) %>% 
+  mutate(best_or_worst = ifelse(rank_cum_contribution < 3 | rank_cum_contribution > max(rank_cum_contribution)-3, 1, 0))
+
+final_eys <- cumulative_contribution_df %>% dplyr::select(nflId, displayName, position, play_number, final_cum_contribution) %>% 
+  group_by(nflId, displayName, position) %>% filter(play_number == max(play_number)) %>% ungroup() %>% 
+  left_join(eys_rank %>% dplyr::select(nflId, displayName, best_or_worst) %>% distinct(), on = c("nflId", "displayName")) %>%
+  filter(best_or_worst == 1)
+
+cumulative_contribution_df %>% left_join(eys_rank, on = c('nflId', 'displayName', 'position', 'final_cum_contribution'))  %>%
+  ggplot() + 
+  geom_line(aes(x = play_number, y = cum_contribution, group = nflId, alpha = best_or_worst)) +
+  geom_text_repel(data = final_eys, aes(x = play_number, y = final_cum_contribution, label=displayName), color = "blue") +
+  theme_classic() + ggtitle("Cumulative Expected Yards Saved") + xlab("Play Number") + ylab("Cumulative Expected Yards Saved (EYS)")
 ```
 
+```{r}
+cumulative_contribution_df %>% dplyr::select(nflId, displayName, position, final_cum_contribution) %>%
+  ggplot(aes(x = position, y = final_cum_contribution)) + geom_violin() + theme_classic()
+  
+
+cumulative_contribution_df  %>% dplyr::select(nflId, displayName, position, final_cum_contribution, avg_contribution) %>% distinct() %>%
+  mutate(rank_cum_contribution = rank(-final_cum_contribution)) %>% 
+  arrange(rank_cum_contribution)  %>% gt()
+  
+  
+```
