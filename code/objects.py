@@ -20,11 +20,15 @@ def calculate_expected_from_vec(marginalized_probs):
     expected_saved = sum(marginalized_probs*field_array)
     return expected_saved
 
-def calculate_expected_from_mat(marginalized_probs_mat):
+def calculate_expected_from_mat(marginalized_probs_mat, for_metric = False):
+    # marginalized_probs_mat.shape == (num_ensemble_models, relevant_frame_num, x_size)
     contribution_array = np.apply_along_axis(calculate_expected_from_vec, axis=2, arr=marginalized_probs_mat)
+    # contribution_array.shape == (num_ensemble_models, relevant_frame_num)
     estimate = np.mean(contribution_array, axis=0)
     lower = np.percentile(contribution_array, q=2.5, axis=0)
     upper = np.percentile(contribution_array, q=97.5, axis=0)
+    if for_metric:
+        return {"estimate": -estimate, "lower": -upper, "upper": -lower}
     return {"estimate": estimate, "lower": lower, "upper": upper}
 
 class play:
@@ -32,6 +36,7 @@ class play:
         self.game_id = game_id
         self.play_id = play_id
         self.tracking_df = tracking.query("gameId == @game_id & playId ==  @play_id")
+        self.playDirection = self.tracking_df.playDirection.reset_index(drop = 1)[0]
         self.ball_carry_id = self.tracking_df.ballCarrierId.reset_index(drop =1)[0]
         self.min_frame = min(self.tracking_df.frameId)
         self.num_frames = max(self.tracking_df.frameId)
@@ -73,37 +78,46 @@ class play:
 
         distance_offense_from_ballcarrier = np.sqrt((off_df['x'] - ball_df['x'].values[0])**2 + (off_df['y'] - ball_df['y'].values[0])**2)
         distance_defense_from_ballcarrier = np.sqrt((def_df['x'] - ball_df['x'].values[0])**2 + (def_df['y'] - ball_df['y'].values[0])**2)
+        # Filter to 7 closest so that omitting a player will not bias results
+        closest = np.argsort(distance_defense_from_ballcarrier)[:11]
+        closest_off = np.argsort(distance_offense_from_ballcarrier)[:11]
 
         off_movement_features = get_player_movement_features(off_df, N)
-        off_acc_mat = off_movement_features['field_weighted_acc']
-        off_vel_mat = off_movement_features['field_weighted_velocity']
-        # off_acc_mat_weight = np.array(distance_offense_from_ballcarrier)[:, np.newaxis, np.newaxis] * off_acc_mat
-        # off_vel_mat_weight = np.array(distance_offense_from_ballcarrier)[:, np.newaxis, np.newaxis] * off_vel_mat
+        # off_acc_mat = off_movement_features['field_weighted_acc']
+        off_vel_mat = off_movement_features['field_weighted_velocity'][closest_off]
+        # off_distance_mat = off_movement_features['distance']
+        # off_acc_mat_weight = (1/np.array(distance_offense_from_ballcarrier+0.001)[:, np.newaxis, np.newaxis] * off_acc_mat)[closest_off]
+        # off_vel_mat_weight = (1/np.array(distance_offense_from_ballcarrier+0.001)[:, np.newaxis, np.newaxis] * off_vel_mat)[closest_off]
 
         def_movement_features = get_player_movement_features(def_df, N)
-        def_acc_mat = def_movement_features['field_weighted_acc']
-        def_vel_mat = def_movement_features['field_weighted_velocity']
-        # def_acc_mat_weight = np.array(distance_defense_from_ballcarrier)[:, np.newaxis, np.newaxis] * def_acc_mat
-        # def_vel_mat_weight = np.array(distance_defense_from_ballcarrier)[:, np.newaxis, np.newaxis] * def_vel_mat
+        # def_acc_mat = def_movement_features['field_weighted_acc']
+        def_vel_mat = def_movement_features['field_weighted_velocity'][closest]
+        # def_distance_mat = off_movement_features['distance']
+        # def_acc_mat_weight = (1/np.array(distance_defense_from_ballcarrier+0.001)[:, np.newaxis, np.newaxis] * def_acc_mat)[closest]
+        # def_vel_mat_weight = (1/np.array(distance_defense_from_ballcarrier+0.001)[:, np.newaxis, np.newaxis] * def_vel_mat)[closest]
 
         ball_movement_features = get_player_movement_features(ball_df, N)
-        ball_acc_mat = ball_movement_features['field_weighted_acc']
+        # ball_acc_mat = ball_movement_features['field_weighted_acc']
         ball_vel_mat = ball_movement_features['field_weighted_velocity']
 
-        off_density = get_player_field_densities(off_df, N)
-        def_density = get_player_field_densities(def_df, N)
+        off_density = get_player_field_densities(off_df.iloc[closest_off], N)
+        def_density = get_player_field_densities(def_df.iloc[closest], N)
 
-        ret = np.stack([off_density, def_density, 
-                np.sum(ball_vel_mat, axis = 0), np.sum(ball_acc_mat, axis = 0),
-                np.sum(off_vel_mat, axis = 0), np.std(off_vel_mat, axis = 0), 
-                np.sum(off_acc_mat, axis = 0), np.std(off_acc_mat, axis = 0),
-                np.sum(def_vel_mat, axis = 0), np.std(def_vel_mat, axis = 0), 
-                np.sum(def_acc_mat, axis = 0), np.std(def_acc_mat, axis = 0),
+        ret = np.stack([
+                off_density, def_density, 
+                # np.min(off_distance_mat, axis = 0), np.min(def_distance_mat, axis = 0),
+                # np.mean(off_distance_mat, axis = 0), np.mean(def_distance_mat, axis = 0),
+                np.sum(ball_vel_mat, axis = 0), 
+                # np.sum(ball_acc_mat, axis = 0),
+                np.sum(off_vel_mat, axis = 0), 
+                # np.max(off_acc_mat_weight, axis = 0), np.sum(off_acc_mat_weight, axis = 0), np.std(off_acc_mat, axis = 0),
+                np.sum(def_vel_mat, axis = 0)
+                # np.max(def_acc_mat_weight, axis = 0), np.sum(def_acc_mat_weight, axis = 0), np.std(def_acc_mat, axis = 0),
                 ])
         if not plot:
             return ret
         else:
-            fig, axes = plt.subplots(nrows=3, ncols=4, figsize=(10, 10))
+            fig, axes = plt.subplots(nrows=6, ncols=3, figsize=(10, 10))
             for i, ax in enumerate(axes.flat):
                 ax.imshow(ret[i, :, :], cmap='viridis')
                 ax.set_title(f'Dimension {i + 1}')
@@ -118,7 +132,7 @@ class play:
             for i in range(self.min_frame, self.num_frames+1)]))
         return batch_images
     
-    def predict_tackle_distribution(self, model, without_player_id = 0, to_df = True, marginal_x = False):
+    def predict_tackle_distribution(self, model, without_player_id = 0, marginal_x = False):
         batch_images = self.get_full_play_tackle_image(N = model.N, without_player_id=without_player_id)
         outputs_all = model.predict_pdf(batch_images)
         outputs = outputs_all['overall_pred'].detach().numpy()
@@ -133,34 +147,34 @@ class play:
         return {'estimate' : outputs, 'lower' : lower, 'upper' : upper, 'all' : all_pred}
     
     def get_expected_eop(self, model, omit = 0):
-        original = self.predict_tackle_distribution(model=model, without_player_id = omit, to_df = False, marginal_x = True)['all']
+        original = self.predict_tackle_distribution(model=model, without_player_id = omit, marginal_x = True)['all']
         expected_dict = calculate_expected_from_mat(original)
         return expected_dict
     
     def get_expected_contribution(self, model, player_id, original_all_pred):
-        w_omission_all_pred = self.predict_tackle_distribution(model=model, without_player_id = player_id, to_df = False, marginal_x = True)['all']
-        contribution_mat_all_pred = original_all_pred-w_omission_all_pred
-        contribution_dict = calculate_expected_from_mat(contribution_mat_all_pred)
+        w_omission_all_pred = self.predict_tackle_distribution(model=model, without_player_id = player_id, marginal_x = True)['all']
+        contribution_mat_all_pred = w_omission_all_pred-original_all_pred
+        contribution_dict = calculate_expected_from_mat(contribution_mat_all_pred, for_metric = True)
         return contribution_dict
     
     def get_plot_df(self, model):
         # Get df from original (i.e. no player replacement)
-        original = self.predict_tackle_distribution(model=model, without_player_id = 0, to_df = False)
+        original_no_omit = self.predict_tackle_distribution(model=model, without_player_id = 0)
         original_exp_eop = self.get_expected_eop(model, omit = 0)
-        outputs, lower, upper = original['estimate'], original['lower'], original['upper']
-        exp_eop, lower_exp_eop, upper_exp_eop = original_exp_eop['estimate'], original_exp_eop['lower'], original_exp_eop['upper']
+        outputs_no_omit, lower_no_omit, upper_no_omit = original_no_omit['estimate'], original_no_omit['lower'], original_no_omit['upper']
+        exp_eop_orig, lower_exp_eop_orig, upper_exp_eop_orig = original_exp_eop['estimate'], original_exp_eop['lower'], original_exp_eop['upper']
         exp_contribution, lower_contribution, upper_contribution = np.zeros(len(range(self.min_frame, self.num_frames+1))), np.zeros(len(range(self.min_frame, self.num_frames+1))), np.zeros(len(range(self.min_frame, self.num_frames+1)))
-        exp_ret = array_to_field_dataframe(input_array=outputs, N=model.N, marginalized=False)
+        exp_ret = array_to_field_dataframe(input_array=outputs_no_omit, N=model.N, marginalized=False)
         exp_ret["type"] = "prob"
-        lower_ret = array_to_field_dataframe(input_array=lower, N=model.N, marginalized=False)
+        lower_ret = array_to_field_dataframe(input_array=lower_no_omit, N=model.N, marginalized=False)
         lower_ret['type'] = "lower"
-        upper_ret = array_to_field_dataframe(input_array=upper, N=model.N, marginalized=False)
+        upper_ret = array_to_field_dataframe(input_array=upper_no_omit, N=model.N, marginalized=False)
         upper_ret['type'] = "upper"
         ret_tackle_probs = pd.concat([exp_ret, lower_ret, upper_ret], axis = 0)
         ret_tackle_probs['omit'] = 0
         ret_tackle_probs['frameId'] = ret_tackle_probs['frameId']+self.min_frame
         ret_tackle_probs = ret_tackle_probs.pivot(index=['x', 'y', 'frameId', 'omit'], columns='type', values='prob').reset_index()
-        ret_contribution = pd.DataFrame({"frameId" : range(self.min_frame, self.num_frames+1), "exp_eop" : exp_eop, "lower_exp_eop" : lower_exp_eop, "upper_exp_eop" : upper_exp_eop,
+        ret_contribution = pd.DataFrame({"frameId" : range(self.min_frame, self.num_frames+1), "exp_eop" : exp_eop_orig, "lower_exp_eop" : lower_exp_eop_orig, "upper_exp_eop" : upper_exp_eop_orig,
                                          "exp_contribution" : exp_contribution, "lower_contribution" : lower_contribution, "upper_contribution" : upper_contribution})
         ret = ret_tackle_probs.merge(ret_contribution, how = "left", on = "frameId")
 
@@ -168,11 +182,16 @@ class play:
         # Predict ommissions
         def_df = self.refine_tracking(frame_id = self.min_frame)["Defense"]
         def_ids = def_df.nflId.unique()
+        original_no_omit_marginalize = self.predict_tackle_distribution(model=model, without_player_id = 0, marginal_x=True)
         for id in tqdm(def_ids):
-            original = self.predict_tackle_distribution(model=model, without_player_id = id, to_df = False)
+            print("--------------------------------------------")
+            print(self.playDirection)
+            print(f"nflId: {id}")
+            print(f"Expected original EOP frame 1: {exp_eop_orig[0]}")
+            original = self.predict_tackle_distribution(model=model, without_player_id = id)
             original_exp_eop = self.get_expected_eop(model, omit = id)
-            original_contribution = self.get_expected_contribution(model, player_id = id)
-            outputs, lower, upper = original['estimate'], original['lower'], original['upper']
+            original_contribution = self.get_expected_contribution(model, player_id = id, original_all_pred=original_no_omit_marginalize['all'])
+            outputs, lower, upper = original['estimate']-outputs_no_omit, original['lower']-lower_no_omit, original['upper']-upper_no_omit
             exp_eop, lower_exp_eop, upper_exp_eop = original_exp_eop['estimate'], original_exp_eop['lower'], original_exp_eop['upper']
             exp_contribution, lower_contribution, upper_contribution = original_contribution['estimate'], original_contribution['lower'], original_contribution['upper']
             exp_ret = array_to_field_dataframe(input_array=outputs, N=model.N, marginalized=False)
@@ -182,13 +201,17 @@ class play:
             upper_ret = array_to_field_dataframe(input_array=upper, N=model.N, marginalized=False)
             upper_ret['type'] = "upper"
             ret_tackle_probs = pd.concat([exp_ret, lower_ret, upper_ret], axis = 0)
-            ret_tackle_probs['omit'] = 0
+            ret_tackle_probs['omit'] = id
             ret_tackle_probs['frameId'] = ret_tackle_probs['frameId']+self.min_frame
             ret_tackle_probs = ret_tackle_probs.pivot(index=['x', 'y', 'frameId', 'omit'], columns='type', values='prob').reset_index()
             ret_contribution = pd.DataFrame({"frameId" : range(self.min_frame, self.num_frames+1), "exp_eop" : exp_eop, "lower_exp_eop" : lower_exp_eop, "upper_exp_eop" : upper_exp_eop,
                                             "exp_contribution" : exp_contribution, "lower_contribution" : lower_contribution, "upper_contribution" : upper_contribution})
             ret = ret_tackle_probs.merge(ret_contribution, how = "left", on = "frameId")
             output_list.append(ret)
+            print(f"Expected with ommitted EOP frame 1: {exp_eop[0]}")
+            print(f"Expected contribution frame 1: {exp_contribution[0]}")
+            print("--------------------------------------------")
+            
         return pd.concat(output_list, axis = 0)
 
 
@@ -198,7 +221,7 @@ class TackleAttemptDataset:
         self.frameIds = frame_ids
         self.images = images
         self.labels = labels
-        self.num_samples = len(images)
+        self.num_samples = len(labels)
     
     def __len__(self):
         return self.num_samples
@@ -219,7 +242,7 @@ class TackleNet(nn.Module):
         self.dropout1 = nn.Dropout(0.2)
 
         # Fully connected layers
-        self.fc1 = nn.Linear(3168, math.ceil(120/N)*math.ceil(54/N))
+        self.fc1 = nn.Linear(77760, math.ceil(120/N)*math.ceil(54/N))
         self.N = N
         
     def forward(self, x):
@@ -233,6 +256,22 @@ class TackleNet(nn.Module):
         # Apply softmax to ensure the output sums to 1 along the channel dimension (12*6)
         x = x.view(-1, math.ceil(120/self.N), math.ceil(54/self.N))
         
+        return x
+    
+class OnlyFC(nn.Module):
+    def __init__(self, N):
+        super().__init__()   
+        # Fully connected layers
+        self.fc1 = nn.Linear(512, math.ceil(120/N)*math.ceil(54/N))
+        self.N=N
+        
+    def forward(self, x):
+        # Flatten the output for the fully connected layers
+        x = x.view(x.size(0), -1)
+        # print(x.shape)
+        x = F.softmax(self.fc1(x), dim=1)
+        # Apply softmax to ensure the output sums to 1 along the channel dimension (12*6)
+        x = x.view(-1, math.ceil(120/self.N), math.ceil(54/self.N))
         return x
     
 def get_player_movement_features(player_df, N):
@@ -256,7 +295,7 @@ def get_player_movement_features(player_df, N):
         i += 1
     return {'distance' : distance_mat, 'field_weighted_velocity': once_weighted_velocity_mat, 'field_weighted_acc' : once_weighted_acceleration_mat}
 
-def get_player_field_densities(player_df, N):
+def get_player_field_densities(player_df, N, missing_id=0):
     density_mat = np.zeros((len(list(range(0, 54, N))), len(list(range(0, 120, N)))))
     for index, row in player_df.iterrows():
         x_rounded = math.floor(row.x / N)

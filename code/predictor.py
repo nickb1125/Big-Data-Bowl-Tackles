@@ -18,8 +18,8 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.animation import FuncAnimation
 
-game_id = 2022100212
-play_id = 2007
+game_id = 2022110605
+play_id = 2397
 
 print("Loading base data")
 print("-----------------")

@@ -12,19 +12,24 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 import random
-from objects import play, TackleAttemptDataset, TackleNet, plot_predictions, TackleNetEnsemble
+from objects import play, TackleAttemptDataset, TackleNet, plot_predictions, TackleNetEnsemble, OnlyFC
 import pickle
+from torchvision import transforms, utils, models
 
-with open(f'data/tackle_images_5_output_5_test.pkl', 'rb') as f:
-    test_dataset = pickle.load(f)
-test_dataloader = DataLoader(test_dataset, batch_size=64, shuffle=True)
 
 # Define Loss
 criterion = nn.BCELoss()
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+
+# open test set dict:
+with open("data/test_frame_dict.pkl", 'rb') as f:
+    test_frame_dict = pickle.load(f)
+from_frame_end_values = list(test_frame_dict.keys())
+from_frame_end_values.sort()
 
 # Train bagged models
-for bag in range(100):
-    with open(f'data/tackle_images_5_output_5_bag_{bag}_stratified.pkl', 'rb') as f:
+for bag in range(10):
+    with open(f'data/tackle_images_1_output_5_bag_{bag}_limited.pkl', 'rb') as f:
         tackle_dataset = pickle.load(f)
 
     train_data, val_data = torch.utils.data.random_split(tackle_dataset, [0.9, 0.1])
@@ -36,13 +41,17 @@ for bag in range(100):
     val_loader = DataLoader(val_data, batch_size=64)
 
     # Create Model
-    model = TackleNet(N = 5, nvar = 12)
+    # model = TackleNet(N = 5, nvar = 5)
+    model = models.resnet18(weights=models.ResNet50_Weights.DEFAULT).to(device)
+    fc = OnlyFC(N=5)
+    model.fc = fc
+    # model.conv1 = nn.Conv2d(5, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
 
     # Define the optimizer (e.g., Stochastic Gradient Descent)
     optimizer = optim.Adam(model.parameters(), lr=0.0005)
 
     # Training loop
-    num_epochs = 10
+    num_epochs = 5
 
     print(f"Training TackleNet bag {bag}...")
     print("---------------------")
@@ -51,6 +60,7 @@ for bag in range(100):
     val_accuracy = []
     for epoch in range(num_epochs):
         for X_batch, y_batch in train_dataloader:
+            X_batch=X_batch[:,:3,:,:]
             optimizer.zero_grad()
             output = model(X_batch)
             loss = criterion(output.flatten(), y_batch.flatten())
@@ -62,6 +72,7 @@ for bag in range(100):
         true_labels = []
         with torch.no_grad():  # Disable gradient computation for inference
             for X_batch, y_batch in train_dataloader:
+                X_batch=X_batch[:,:3,:,:]
                 outputs = model(X_batch)
                 predictions.append(outputs.flatten())
                 true_labels.append(y_batch.flatten())
@@ -77,6 +88,7 @@ for bag in range(100):
         with torch.no_grad():  # Disable gradient computation for inference
             i = 0
             for X_batch, y_batch in val_loader:
+                X_batch=X_batch[:,:3,:,:]
                 outputs = model(X_batch)
                 predictions.append(outputs.flatten())
                 true_labels.append(y_batch.flatten())
@@ -101,26 +113,36 @@ for bag in range(100):
     true_labels = []
     exact_correct = []
     with torch.no_grad():  # Disable gradient computation for inference
-        i = 0
-        for X_batch, y_batch in test_dataloader:
-            outputs = model(X_batch)
-            predictions.append(outputs.flatten())
-            true_labels.append(y_batch.flatten())
-            # for accuracy:
-            max_values, _ = torch.max(outputs, dim=-1, keepdim=True)
-            max_values, _ = torch.max(max_values, dim=-2, keepdim=True)
-            masks = torch.where(outputs == max_values, 1, 0)
-            equivalence_values = np.all(masks.detach().numpy() == y_batch.detach().numpy(), axis=(1, 2)).tolist()
-            exact_correct.extend(equivalence_values)
-            i += 1
-        predictions = torch.cat(predictions, dim=0) 
-        true_labels = torch.cat(true_labels, dim=0) 
-        test_loss = criterion(predictions, true_labels)
-    test_acc = sum(exact_correct)/len(exact_correct)
-    print(f"Bag {bag} Final Test Preformance:")
-    print("---------------------------------")
-    print(f"Test Loss: {test_loss}")
-    print(f"Test Accuracy: {test_acc}")
+        for from_end_frame in from_frame_end_values:
+            with open(f'data/tackle_images_5_output_5_test_{from_end_frame}_from_end.pkl', 'rb') as f:
+                test_dataset = pickle.load(f)
+            test_dataloader = DataLoader(test_dataset, batch_size=64, shuffle=True)
+            predictions = []
+            true_labels = []
+            exact_correct = []
+            with torch.no_grad():  # Disable gradient computation for inference
+                for X_batch, y_batch in test_dataloader:
+                    X_batch=X_batch[:,:3,:,:]
+                    outputs = model(X_batch)
+                    if (i == 0):
+                        plot_predictions(outputs, y_batch)
+                    predictions.append(outputs.flatten())
+                    true_labels.append(y_batch.flatten())
+                    # for accuracy:
+                    max_values, _ = torch.max(outputs, dim=-1, keepdim=True)
+                    max_values, _ = torch.max(max_values, dim=-2, keepdim=True)
+                    masks = torch.where(outputs == max_values, 1, 0)
+                    equivalence_values = np.all(masks.detach().numpy() == y_batch.detach().numpy(), axis=(1, 2)).tolist()
+                    exact_correct.extend(equivalence_values)
+                    i += 1
+                predictions = torch.cat(predictions, dim=0) 
+                true_labels = torch.cat(true_labels, dim=0) 
+                test_loss = criterion(predictions, true_labels)
+            test_acc = sum(exact_correct)/len(exact_correct)
+            print("---------------------------------")
+            print(f"Number of test samples for {from_end_frame} frames from EOP: {len(exact_correct)}")
+            print(f"Test Loss for {from_end_frame} frames from EOP: {test_loss}")
+            print(f"Test Accuracy for {from_end_frame} frames from EOP: {test_acc}")
 
 
     # plt.figure(figsize=(10, 5))
@@ -147,30 +169,36 @@ for bag in range(100):
 
 ### Final ensemble on test
 ensemble_model = TackleNetEnsemble(num_models=10, N = 5)
-predictions = []
-true_labels = []
-exact_correct = []
-with torch.no_grad():  # Disable gradient computation for inference
-    i = 0
-    for X_batch, y_batch in test_dataloader:
-        outputs = ensemble_model.predict_pdf(X_batch)
-        if (i == 0):
-            plot_predictions(outputs, y_batch)
-        predictions.append(outputs.flatten())
-        true_labels.append(y_batch.flatten())
-        # for accuracy:
-        max_values, _ = torch.max(outputs, dim=-1, keepdim=True)
-        max_values, _ = torch.max(max_values, dim=-2, keepdim=True)
-        masks = torch.where(outputs == max_values, 1, 0)
-        equivalence_values = np.all(masks.detach().numpy() == y_batch.detach().numpy(), axis=(1, 2)).tolist()
-        exact_correct.extend(equivalence_values)
-        i += 1
-    predictions = torch.cat(predictions, dim=0) 
-    true_labels = torch.cat(true_labels, dim=0) 
-    test_loss = criterion(predictions, true_labels)
-test_acc = sum(exact_correct)/len(exact_correct)
+i = 0
 print(f"ENSEMBLE MODEL Final Test Preformance:")
 print("---------------------------------")
-print(f"Test Loss: {test_loss}")
-print(f"Test Accuracy: {test_acc}")
+for from_end_frame in from_frame_end_values:
+    with open(f'data/tackle_images_5_output_5_test_{from_end_frame}_from_end.pkl', 'rb') as f:
+        test_dataset = pickle.load(f)
+    test_dataloader = DataLoader(test_dataset, batch_size=64, shuffle=True)
+    predictions = []
+    true_labels = []
+    exact_correct = []
+    with torch.no_grad():  # Disable gradient computation for inference
+        for X_batch, y_batch in test_dataloader:
+            outputs = ensemble_model.predict_pdf(X_batch)['overall_pred']
+            if (i == 0):
+                plot_predictions(outputs, y_batch)
+            predictions.append(outputs.flatten())
+            true_labels.append(y_batch.flatten())
+            # for accuracy:
+            max_values, _ = torch.max(outputs, dim=-1, keepdim=True)
+            max_values, _ = torch.max(max_values, dim=-2, keepdim=True)
+            masks = torch.where(outputs == max_values, 1, 0)
+            equivalence_values = np.all(masks.detach().numpy() == y_batch.detach().numpy(), axis=(1, 2)).tolist()
+            exact_correct.extend(equivalence_values)
+            i += 1
+        predictions = torch.cat(predictions, dim=0) 
+        true_labels = torch.cat(true_labels, dim=0) 
+        test_loss = criterion(predictions, true_labels)
+    test_acc = sum(exact_correct)/len(exact_correct)
+    print("---------------------------------")
+    print(f"Number of test samples for {from_end_frame} frames from EOP: {len(exact_correct)}")
+    print(f"Test Loss for {from_end_frame} frames from EOP: {test_loss}")
+    print(f"Test Accuracy for {from_end_frame} frames from EOP: {test_acc}")
 

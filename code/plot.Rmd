@@ -19,6 +19,8 @@ library(ggrepel)
 library(tidyr)
 library(ggpubr)
 library(viridis)
+library(gt)
+library(gtExtras)
 ```
 
 ```{r}
@@ -31,11 +33,7 @@ tackles <- read.csv(here::here("data/nfl-big-data-bowl-2024/tackles.csv"))
 tracking <- do.call(rbind, lapply(seq(1, 9), function(week) {read.csv(here::here(paste0("data/nfl-big-data-bowl-2024/tracking_a_week_", week, ".csv")))}))
 ```
 
-
 ```{r}
-game_id = 2022100212
-play_id = 2007
-
 plot_marginal_contribution <- function(game_id, play_id) {
   pred_df <- read.csv(paste0("/Users/nickbachelder/Desktop/Personal Code/Kaggle/Tackles/", game_id, "_", play_id, ".csv")) %>% dplyr::select(-X) %>%
       mutate(x = as.numeric(x), y = as.numeric(y))
@@ -43,7 +41,7 @@ plot_marginal_contribution <- function(game_id, play_id) {
   all_frames <- unique(pred_no_original$frameId)
   max_prob <- max(pred_no_original$upper)
   min_prob <- min(pred_no_original$lower)
-  saveGIF({for (i in 24:max(all_frames)) {
+  saveGIF({for (i in min(all_frames):max(all_frames)) {
     pred_df_frame <- pred_no_original %>% filter(frameId == i)
     p <- pred_df_frame %>% dplyr::select(-y) %>% group_by(omit, x) %>% dplyr::summarise(lower = sum(lower), upper = sum(upper), prob = sum(prob)) %>% ungroup() %>% 
       mutate(omit = as.factor(omit)) %>%
@@ -217,15 +215,34 @@ plot_combine_play_contribution <- function(game_id, play_id) {
         plot_list[[iter]] <- p
         iter = iter+1
       }
-      arranged_plots <- ggarrange(plotlist = plot_list, ncol = 3, nrow = 4)
+      arranged_plots <- ggarrange(plotlist = plot_list, ncol = 3, nrow = 5)
       arranged_plots2 <-ggarrange(plotlist = list(main, arranged_plots), ncol = 1, nrow = 2)
       print(arranged_plots2)
       print(paste0("Frame ", i))
       ani.pause()}
     },movie.name="facet_zoom_2.gif",ani.width = 600, ani.height = 600)
 }
+```
 
-plot_marginal_contribution(game_id, play_id)
+```{r}
+game_id = 2022110605
+play_id = 2397
+
+plot_combine_play_contribution(game_id, play_id)
+plot_play(game_id, play_id)
+```
+
+
+
+
+
+
+```{r}
+pred_df <- read.csv(paste0("/Users/nickbachelder/Desktop/Personal Code/Kaggle/Tackles/", game_id, "_", play_id, ".csv")) %>% dplyr::select(-X) %>%
+      mutate(x = as.numeric(x), y = as.numeric(y))
+pred_df %>% filter(omit==45287) %>%
+  left_join(pred_df %>% filter(omit==0) %>% dplyr::select(frameId,exp_eop) %>% 
+              dplyr::rename(exp_eop_orig = exp_eop)) %>% dplyr::select(frameId, exp_eop, exp_eop_orig, exp_contribution) %>% distinct()
 ```
 
 
@@ -248,25 +265,33 @@ plot_marginal_contribution(game_id, play_id)
 
 
 
-
-
-
-
-
-
-
-
-
+```{r}
+contribution_df %>% filter(rank(estimated) < 10)
+```
 
 
 
 ```{r}
-contribution_df <- read.csv(here::here("data/contribution_df.csv"))
+tracking %>% filter(gameId == game_id, playId == play_id)
+```
+
+
+
+```{r}
+contribution_df %>% filter(game_id == game_id, play_id == play_id)
+```
+
+
+```{r}
+contribution_df <- read.csv(here::here("data/contribution_df.csv")) 
+
+ggplot(data=contribution_df) + geom_density(aes(x=estimated))
 
 cumulative_contribution_df <-  contribution_df %>% arrange(play_id) %>% group_by(nflId, displayName, position) %>% 
   mutate(play_number = rank(play_id), cum_contribution = cumsum(estimated), 
          avg_contribution= mean(cum_contribution),
-         final_cum_contribution = cum_contribution[play_number == max(play_number)]) %>% ungroup()
+         final_cum_contribution = cum_contribution[play_number == max(play_number)],
+         total_play_num = max(play_number)) %>% ungroup()
 
 eys_rank <- cumulative_contribution_df %>% dplyr::select(nflId, displayName, position, final_cum_contribution) %>% distinct() %>%
   mutate(rank_cum_contribution = rank(-final_cum_contribution)) %>% dplyr::select(-final_cum_contribution) %>%
@@ -290,9 +315,42 @@ cumulative_contribution_df %>% dplyr::select(nflId, displayName, position, final
   ggplot(aes(x = position, y = final_cum_contribution)) + geom_violin() + theme_classic()
   
 
-cumulative_contribution_df  %>% dplyr::select(nflId, displayName, position, final_cum_contribution, avg_contribution) %>% distinct() %>%
-  mutate(rank_cum_contribution = rank(-final_cum_contribution)) %>% 
-  arrange(rank_cum_contribution)  %>% gt()
-  
-  
+general_table <- cumulative_contribution_df  %>% dplyr::select(nflId, displayName, position, final_cum_contribution, avg_contribution, total_play_num) %>% distinct() %>%
+  mutate(rank_cum_contribution = rank(-final_cum_contribution), rank_avg_contribution = rank(-avg_contribution)) %>%
+  arrange(rank_cum_contribution) 
+
+general_table %>% filter(rank_cum_contribution < 10)  %>% gt() %>% gt_theme_538()
+general_table %>% filter(rank_avg_contribution < 10)  %>% gt() %>% gt_theme_538()
+
+general_table %>% ggplot() + geom_point(aes(x = total_play_num, y = avg_contribution))
+
+cor(general_table$total_play_num, general_table$avg_contribution)
 ```
+
+
+```{r}
+general_table %>%
+  left_join(
+    tackles %>% dplyr::select(nflId, tackle, assist, forcedFumble) %>% 
+      distinct() %>% group_by(nflId) %>% dplyr::summarise(total_tackle_involvement = sum(tackle, assist, forcedFumble)) %>% ungroup(),
+    on = c("nflId")) %>% ggplot(aes(x=rank_cum_contribution, y=total_tackle_involvement)) + geom_point()
+```
+
+
+
+
+```{r}
+frames <- seq(1,30)
+all_contained <- c()
+for (trial in seq(1, 1000)) {
+  values <- c()
+  for (i in seq(1, 100)) {
+    values[i] <- sample(frames, 1)
+  all_contained[trial] = length(unique(values))/30
+  }
+}
+mean(all_contained)
+```
+
+
+
