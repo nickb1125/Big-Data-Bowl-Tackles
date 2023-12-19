@@ -13,7 +13,59 @@ from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 import random
 import pickle
-from scipy.stats import norm
+from scipy.stats import multivariate_normal
+from torchvision import transforms, utils, models
+from torch.distributions import MultivariateNormal, OneHotCategorical
+import torch.nn.init as init
+
+
+def plot_predictions(prediction_output, true):
+    fig, axs = plt.subplots(5, 4, figsize=(16, 16))
+    pi_models, normal_models = prediction_output[0], prediction_output[1]
+    means = normal_models.mean # (Batch, Nmix, 2)
+    cov = normal_models.covariance_matrix # (Batch, Nmix, 2, # (Batch, Nmix, 2))
+    probs = pi_models.probs # (Batch, Nmix)
+
+    x, y = torch.meshgrid(torch.linspace(0, 120, 120), torch.linspace(0, 53, 53))
+    grid_points = torch.stack([x, y], dim=-1).view(-1, 2)
+
+    # Flatten the 8x8 grid of subplots to a 1D array for easier indexing
+    axs = axs.flatten()
+
+    # Loop through the 64 images and display each in a subplot
+    for i in range(20):
+        # Calculate the mixture bivariate PDF
+        pdf_values = np.array([probs[i][k]*np.exp(MultivariateNormal(means[i, k], cov[i,k]).log_prob(grid_points).detach().numpy())
+                                for k in range(means.shape[1])]) # (nmix, num_grid_points)
+        pdf = np.sum(pdf_values, axis = 0).view(120, 53)
+        axs[i].imshow(pdf, cmap='Reds', interpolation='none')
+        axs[i].axis('off')  # Turn off the axis for each subplot
+        axs[i].set_title(f"Image {i + 1}")
+        axs[i].grid()
+        axs[i].plot(true[i, 1], true[i, 0], 'ro', markersize=0.5, color='blue')
+    plt.subplots_adjust(wspace=0.2, hspace=0.2)
+    plt.show()
+
+def plot_field(pdf_output, true):
+    fig, axs = plt.subplots(8, 8, figsize=(16, 16))
+    x, y = torch.meshgrid(torch.linspace(0, 120, 120), torch.linspace(0, 53, 53))
+    grid_points = torch.stack([x, y], dim=-1).view(-1, 2)
+
+    # Flatten the 8x8 grid of subplots to a 1D array for easier indexing
+    axs = axs.flatten()
+
+    # Loop through the 64 images and display each in a subplot
+    for i in range(pdf_output.shape[0]):
+        pdf = pdf_output[i, :, :]
+        axs[i].imshow(pdf, cmap='Reds', interpolation='none')
+        axs[i].axis('off')  # Turn off the axis for each subplot
+        axs[i].set_title(f"Image {i + 1}")
+        axs[i].grid()
+        axs[i].plot(true[i, 1], true[i, 0], 'ro', markersize=0.5, color='blue')
+    plt.subplots_adjust(wspace=0.2, hspace=0.2)
+    plt.show()
+
+
 
 def calculate_expected_from_vec(marginalized_probs):
     field_array = np.array(range(0, 120, 5))+2.5
@@ -308,52 +360,6 @@ def get_player_field_densities(player_df, N, missing_id=0):
             raise ValueError
     return density_mat
     
-def plot_predictions(prediction_output, true):
-    fig, axs = plt.subplots(8, 8, figsize=(16, 16))
-
-    # Flatten the 8x8 grid of subplots to a 1D array for easier indexing
-    axs = axs.flatten()
-
-    # Loop through the 64 images and display each in a subplot
-    for i in range(64):
-        image = prediction_output[i].detach().numpy()
-        true_image = true[i].detach().numpy()
-        axs[i].imshow(image, cmap='Reds', interpolation='none')
-        axs[i].axis('off')  # Turn off the axis for each subplot
-        axs[i].set_title(f"Image {i + 1}")
-        axs[i].grid()
-        x_max = true_image.shape[0]
-        y_max = true_image.shape[1]
-        for k in range(x_max):
-            for l in range(y_max):
-                # axs[i].text(l, k, f'{image[k, l]:.1f}', ha='center', va='center', color='black')
-                if true_image[k, l] == 1:
-                    axs[i].plot(l, k, 'ro', markersize=0.5, color='blue')               
-    # Adjust spacing between subplots to make them look better
-    plt.subplots_adjust(wspace=0.2, hspace=0.2)
-    plt.show()
-
-class TackleNetEnsemble:
-    def __init__(self, num_models, N = 5):
-        self.N = N
-        self.models = dict()
-        self.num_models = num_models
-        for mod_num in range(num_models):
-            with open(f"model_{mod_num}.pkl", 'rb') as f:
-                model = pickle.load(f)
-            self.models.update({mod_num : model})
-    
-    def predict_pdf(self, image):
-        preds = []
-        for mod_num in range(self.num_models):
-            model = self.models[mod_num]
-            pred = model(image)
-            preds.append(pred)
-        preds = torch.stack(preds)
-        lower = torch.min(preds, axis = 0).values
-        overall_pred = torch.mean(preds, axis = 0)
-        upper = torch.max(preds, axis = 0).values
-        return {'overall_pred' : overall_pred, 'lower' : lower, 'upper' : upper, 'all_pred' : preds}
     
 def array_to_field_dataframe(input_array, N, marginalized = False):
     pred_list=[]
@@ -372,8 +378,120 @@ def array_to_field_dataframe(input_array, N, marginalized = False):
     pred_df = pd.concat(pred_list, axis = 0)
     return pred_df
 
+def get_discrete_pdf_from_mvn(model):
+    coordinates = np.floor(model.sample(sample_shape=torch.Size([10000]))).numpy()
+    print(coordinates)
+    condition_x = (coordinates[:,0] >= 0) & (coordinates[:,0] <= 53.3)
+    condition_y = (coordinates[:,1] >= 0) & (coordinates[:,1] <= 120)
+    valid_indices = (condition_x & condition_y)
+    coordinates = coordinates[valid_indices, :]
+    grid = np.zeros((120, 54), dtype=int)
+    x_indices = coordinates[:, 0].astype(int)
+    y_indices = coordinates[:, 1].astype(int)
+    np.add.at(grid, (y_indices, x_indices), 1)
+    discrete_pdf = grid / len(coordinates)
+    return discrete_pdf
+
+def get_mixture_pdf(normal_models, pi_models):
+    mean = normal_models.mean # (Batch, Nmix, 2)
+    cov = normal_models.covariance_matrix # (Batch, Nmix, 2, # (Batch, Nmix, 2))
+    probs = pi_models.probs # (Batch, Nmix)
+    x, y = torch.meshgrid(torch.linspace(0, 120, 120), torch.linspace(0, 53, 53))
+    pdfs = np.zeros((mean.shape[0], 120, 54))
+    for batch in range(mean.shape[0]):
+        pdf_values = np.array([probs[batch][k]*get_discrete_pdf_from_mvn(MultivariateNormal(mean[batch, k], cov[batch,k]))
+                        for k in range(mean.shape[1])]) # (nmix, num_grid_points)
+        pdf = np.sum(pdf_values, axis = 0).view(120, 54)
+        pdfs[batch,:,:] = pdf
+    return pdfs
+
+
+class TackleNetEnsemble:
+    def __init__(self, num_models):
+        self.models = dict()
+        self.num_models = num_models
+        for mod_num in range(num_models):
+            with open(f"model_{mod_num}.pkl", 'rb') as f:
+                model = pickle.load(f)
+            self.models.update({mod_num : model})
+    
+    def predict_pdf(self, image):
+        preds = []
+        for mod_num in range(self.num_models):
+            model = self.models[mod_num]
+            pred = model(image)
+            pred = get_mixture_pdf(pred[1], pred[0])
+            preds.append(pred)
+        preds = np.stack(preds)
+        lower = np.min(preds, axis = 0)
+        overall_pred = np.mean(preds, axis = 0)
+        upper = np.max(preds, axis = 0)
+        return {'overall_pred' : overall_pred, 'lower' : lower, 'upper' : upper, 'all_pred' : preds}
+    
+
+class GaussianMixtureDiscreteLogLoss(nn.Module):
+    def __init__(self):
+        super(GaussianMixtureLoss, self).__init__()
+
+    def forward(self, output, y):
+        pi_model, normal_model = output[0], output[1]
+        loglik = normal_model.log_prob(y.unsqueeze(1).expand_as(normal_model.loc))
+        loss = -torch.logsumexp(torch.log(pi_model.probs) + loglik, dim=1)
+        return loss.mean()
+
+class GaussianMixtureLoss(nn.Module):
+    def __init__(self):
+        super(GaussianMixtureLoss, self).__init__()
+
+    def forward(self, output, y):
+        pi_model, normal_model = output[0], output[1]
+        loglik = normal_model.log_prob(y.unsqueeze(1).expand_as(normal_model.loc))
+        loss = -torch.logsumexp(torch.log(pi_model.probs) + loglik, dim=1)
+        return loss.mean()
 
                 
+class BivariateGaussianMixture(nn.Module):
+    def __init__(self, nmix, full_cov=True):
+        super().__init__()
+        self.nmix = nmix
+        self.conv1 = nn.Conv2d(5, 3, kernel_size=3, padding=1)
+        self.pool1 = nn.MaxPool2d(kernel_size = 5, stride=1)        
+        self.dropout1 = nn.Dropout(0.5)
+        self.dropout2 = nn.Dropout(0.8)
+        self.resnet = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
+        self.mu_net = nn.Linear(792, nmix * 2)
+        self.cov_net = nn.Linear(792, 2 * nmix)
+        self.pi_net = nn.Linear(792, nmix)
+        self.elu = nn.ELU()
+        init.constant_(self.mu_net.bias, 0.5)
+        init.constant_(self.pi_net.bias, 10)
+
+
+    def forward(self, x):
+        # print(f"OG Shape: {x.shape}")
+        x = self.conv1(x)
+        # x = self.resnet(x)
+        x = x.view(x.size(0), -1)
+        
+        # print(f"After Encoder Shape: {x.shape}")
+        field_scaler = torch.stack([torch.Tensor([53.3, 120])] * self.nmix, dim=0)
+        mean = torch.sigmoid(self.mu_net(x))
+        mean = mean.reshape(mean.shape[0], self.nmix, 2)*field_scaler
+        # print(f"Mean Shape: {mean.shape}")
+        # print(f"Means: {mean[0]}")
+        cov = nn.ELU()(self.cov_net(x))+1+1e-6
+        # cov = torch.sigmoid(self.cov_net(x))
+        cov = cov.reshape(mean.shape[0], self.nmix, 2)
+        cov = torch.diag_embed(cov)
+        # print(f"Cov Shape: {cov.shape}")
+        # print(f"Cov: {cov[0]}")
+        params = F.softmax(self.pi_net(x), dim = 1)
+        # print(f"Mixture Shape: {params.shape}")
+        # print(f"Mixture Probs: {params[0]}")
+        return OneHotCategorical(probs=params), MultivariateNormal(loc=mean, covariance_matrix=cov)
+
+    
+
 
 
 
@@ -381,10 +499,6 @@ def array_to_field_dataframe(input_array, N, marginalized = False):
 
 
 
-### We can meausre:
-# (1) TackleEffect: Average expected yards saved by tackler over all plays over all time points
-# (2) TackleConsistency: Distributional variance of average estimateed tackle effect distribution
-# (3) TackleRisk: Average bimodalness of estimated tackle effect distribution
 
-### We can calculate confidence intervals for these using the sampling variance (i.e. standard errors)
-### of our CNN, as calculated through bagging samples.
+
+

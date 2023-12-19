@@ -39,7 +39,7 @@ def_ids = def_df.nflId.unique()
 
 # Define model
 
-model = TackleNetEnsemble(num_models = 10, N = 5)
+model = TackleNetEnsemble(nvar = 10, N = 5)
 
 all_pred = play_object.get_plot_df(model = model)
 all_pred.to_csv(f"{game_id}_{play_id}.csv")

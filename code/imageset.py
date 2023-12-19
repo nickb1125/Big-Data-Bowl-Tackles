@@ -47,7 +47,7 @@ if load_test:
             frame_dict[frames_from_end]['play_ids'].append(play_row.playId)
             frame_dict[frames_from_end]['frame_ids'].append(frame_id)
             try:
-                image = play_object.get_grid_features(frame_id = frame_id, N = 1)
+                image = play_object.get_grid_features(frame_id = frame_id, N = N)
             except ValueError:
                 # print("Below is lacking a type of position and is being omitted, check if desired...")
                 # print(row)
@@ -57,7 +57,8 @@ if load_test:
                 # print(row)
                 continue
             frame_dict[frames_from_end]['images'].append(image)
-            frame_dict[frames_from_end]['labels'].append(play_object.get_end_of_play_matrix(N = N))
+            # frame_dict[frames_from_end]['labels'].append(play_object.get_end_of_play_matrix(N = N))
+            frame_dict[frames_from_end]['labels'].append(play_object.eop[['eop_x', 'eop_y']].iloc[0].tolist())
 
     with open(f"data/test_frame_dict.pkl", f'wb') as outp:  # Overwrites any existing file.
         pickle.dump(frame_dict, outp, pickle.HIGHEST_PROTOCOL)
@@ -91,7 +92,7 @@ for bag in range(10):
         play_ids.append(play_row.playId)
         frame_ids.append(frame_id)
         try:
-            image = play_object.get_grid_features(frame_id = frame_id, N = 1)
+            image = play_object.get_grid_features(frame_id = frame_id, N = N)
         except ValueError:
             # print("Below is lacking a type of position and is being omitted, check if desired...")
             # print(row)
@@ -101,10 +102,11 @@ for bag in range(10):
             # print(row)
             continue
         images.append(image)
-        labels.append(play_object.get_end_of_play_matrix(N = N))
+        # labels.append(play_object.get_end_of_play_matrix(N = N))
+        labels.append(play_object.eop[['eop_x', 'eop_y']].iloc[0].tolist())
     tackle_dataset = TackleAttemptDataset(images = images, labels = labels, play_ids = play_ids, frame_ids = frame_ids)
 
-    with open(f"data/tackle_images_1_output_5_bag_{bag}_limited.pkl", f'wb') as outp:  # Overwrites any existing file.
+    with open(f"data/tackle_images_5_output_5_bag_{bag}_mixture.pkl", f'wb') as outp:  # Overwrites any existing file.
         pickle.dump(tackle_dataset, outp, pickle.HIGHEST_PROTOCOL)
 
 
