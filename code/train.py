@@ -12,7 +12,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 import random
-from objects import plot_field, play, TackleAttemptDataset, TackleNet, plot_predictions, TackleNetEnsemble, BivariateGaussianMixture, GaussianMixtureLoss
+from objects import plot_field, play, TackleAttemptDataset, plot_predictions, TackleNetEnsemble, BivariateGaussianMixture, GaussianMixtureLoss
 import pickle
 from torchvision import transforms, utils, models
 from torch.optim import lr_scheduler
@@ -33,8 +33,9 @@ from_frame_end_values.sort()
 
 if train:
     # Train bagged models
-    for bag in range(10):
-        with open(f'data/tackle_images_5_output_5_bag_{bag}_mixture.pkl', 'rb') as f:
+    bag = 0
+    while bag < 10:
+        with open(f'data/tackle_image_bag_{bag}.pkl', 'rb') as f:
             tackle_dataset = pickle.load(f)
 
         train_data, val_data = torch.utils.data.random_split(tackle_dataset, [0.9, 0.1])
@@ -58,13 +59,14 @@ if train:
         scheduler = lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.8)
 
         # Training loop
-        num_epochs = 50
+        num_epochs = 25
 
         print(f"Training TackleNet bag {bag}...")
         print("---------------------")
         losses = []
         val_losses = []
         val_accuracy = []
+        start_over = False
         for epoch in range(num_epochs):
             if epoch >= 5:
                 for param in model.resnet.parameters():
@@ -74,12 +76,18 @@ if train:
                     model.resnet.requires_grad = True
             for X_batch, y_batch in train_dataloader:
                 optimizer.zero_grad()
-                output = model(X_batch)
+                try:
+                    output = model(X_batch)
+                except:
+                    print("Gradient Exploded, trying to train this model again...")
+                    start_over = True
+                    break
                 loss = criterion(output, y_batch)
                 # print(loss)
                 loss.backward()
                 optimizer.step()
-
+            if start_over:
+                break
             # After training, you can use the model to make predictions
             losses_1 = []
             with torch.no_grad():  # Disable gradient computation for inference
@@ -100,12 +108,14 @@ if train:
                 val_loss = sum(val_losses)
             print(f"Validation Loss: {val_loss}")
             scheduler.step()
+        if start_over:
+            continue
 
         ### For test set
         test_losses = []
         with torch.no_grad():  # Disable gradient computation for inference
             for from_end_frame in from_frame_end_values:
-                with open(f'data/tackle_images_5_output_5_test_{from_end_frame}_from_end.pkl', 'rb') as f:
+                with open(f'data/test_tackle_images_{from_end_frame}_from_end.pkl', 'rb') as f:
                     test_dataset = pickle.load(f)
                 test_dataloader = DataLoader(test_dataset, batch_size=64, shuffle=True)
                 predictions = []
@@ -120,6 +130,7 @@ if train:
                 print("---------------------------------")
                 print(f"Number of test samples for {from_end_frame} frames from EOP: {counter}")
                 print(f"Test Loss for {from_end_frame} frames from EOP: {test_loss}")
+        bag += 1
 
 
         # plt.figure(figsize=(10, 5))
@@ -145,28 +156,28 @@ if train:
             pickle.dump(model, outp, pickle.HIGHEST_PROTOCOL)
 
 ### Final ensemble on test
-ensemble_model = TackleNetEnsemble(num_models=10)
+ensemble_model = TackleNetEnsemble(num_models=10, N=1)
 i = 0
 print(f"ENSEMBLE MODEL Final Test Preformance:")
 print("---------------------------------")
 test_losses = []
 for from_end_frame in from_frame_end_values:
-    with open(f'data/tackle_images_5_output_5_test_{from_end_frame}_from_end.pkl', 'rb') as f:
+    with open(f'data/test_tackle_images_{from_end_frame}_from_end.pkl', 'rb') as f:
         test_dataset = pickle.load(f)
-    test_dataloader = DataLoader(test_dataset, batch_size=64, shuffle=True)
+    test_dataloader = DataLoader(test_dataset, batch_size=len(test_dataset), shuffle=True)
+    counter = 0
     with torch.no_grad():  # Disable gradient computation for inference
         for X_batch, y_batch in test_dataloader:
-            outputs = ensemble_model.predict_pdf(X_batch)['overall_pred']
-            # test_loss = criterion(outputs, y_batch)
-            # test_losses.append(test_loss)
-            print(X_batch.shape)
-            print(outputs.shape)
+            counter += X_batch.shape[0]
+            pred = ensemble_model.predict_pdf(X_batch)
+            output_model = pred['mixture_return']
+            outputs = pred['overall_pred']
+            test_loss = criterion(output_model, y_batch)
+            test_losses.append(test_loss)
             if (i == 0):
                 plot_field(outputs, y_batch)
             i += 1
-    # test_loss = sum(test_losses)
-    #print("---------------------------------")
-    #print(f"Number of test samples for {from_end_frame} frames from EOP: {len(exact_correct)}")
-    #print(f"Test Loss for {from_end_frame} frames from EOP: {test_loss}")
-    #print(f"Test Accuracy for {from_end_frame} frames from EOP: {test_acc}")
-
+    test_loss = sum(test_losses)
+    print("---------------------------------")
+    print(f"Number of test samples for {from_end_frame} frames from EOP: {counter}")
+    print(f"Test Loss for {from_end_frame} frames from EOP: {test_loss}")

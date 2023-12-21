@@ -12,7 +12,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 import random
-from objects import play, TackleAttemptDataset, TackleNet, plot_predictions
+from objects import play, TackleAttemptDataset, plot_predictions
 import pickle
 
 print("Loading base data")
@@ -47,7 +47,7 @@ if load_test:
             frame_dict[frames_from_end]['play_ids'].append(play_row.playId)
             frame_dict[frames_from_end]['frame_ids'].append(frame_id)
             try:
-                image = play_object.get_grid_features(frame_id = frame_id, N = N)
+                image = play_object.get_grid_features(frame_id = frame_id, N = 1)
             except ValueError:
                 # print("Below is lacking a type of position and is being omitted, check if desired...")
                 # print(row)
@@ -69,7 +69,7 @@ if load_test:
                                               labels = frame_dict[frame_from_end]['labels'], 
                                               play_ids = frame_dict[frame_from_end]['play_ids'], 
                                               frame_ids = frame_dict[frame_from_end]['frame_ids'])
-        with open(f"data/tackle_images_5_output_5_test_{frame_from_end}_from_end.pkl", f'wb') as outp:  # Overwrites any existing file.
+        with open(f"data/test_tackle_images_{frame_from_end}_from_end.pkl", f'wb') as outp:  # Overwrites any existing file.
             pickle.dump(tackle_dataset, outp, pickle.HIGHEST_PROTOCOL)
 
 print("Getting training and validation images....")
@@ -92,7 +92,7 @@ for bag in range(10):
         play_ids.append(play_row.playId)
         frame_ids.append(frame_id)
         try:
-            image = play_object.get_grid_features(frame_id = frame_id, N = N)
+            image = play_object.get_grid_features(frame_id = frame_id, N = 1)
         except ValueError:
             # print("Below is lacking a type of position and is being omitted, check if desired...")
             # print(row)
@@ -106,7 +106,7 @@ for bag in range(10):
         labels.append(play_object.eop[['eop_x', 'eop_y']].iloc[0].tolist())
     tackle_dataset = TackleAttemptDataset(images = images, labels = labels, play_ids = play_ids, frame_ids = frame_ids)
 
-    with open(f"data/tackle_images_5_output_5_bag_{bag}_mixture.pkl", f'wb') as outp:  # Overwrites any existing file.
+    with open(f"data/tackle_image_bag_{bag}.pkl", f'wb') as outp:  # Overwrites any existing file.
         pickle.dump(tackle_dataset, outp, pickle.HIGHEST_PROTOCOL)
 
 

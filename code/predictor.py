@@ -12,14 +12,14 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 import random
-from objects import play, TackleAttemptDataset, TackleNet, plot_predictions, TackleNetEnsemble
+from objects import play, TackleAttemptDataset, plot_predictions, TackleNetEnsemble
 import pickle
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.animation import FuncAnimation
 
-game_id = 2022110605
-play_id = 2397
+game_id = 2022090800
+play_id = 101
 
 print("Loading base data")
 print("-----------------")
@@ -39,11 +39,10 @@ def_ids = def_df.nflId.unique()
 
 # Define model
 
-model = TackleNetEnsemble(nvar = 10, N = 5)
+model = TackleNetEnsemble(num_models = 10, N = 1)
 
 all_pred = play_object.get_plot_df(model = model)
 all_pred.to_csv(f"{game_id}_{play_id}.csv")
-
 
 
 ### plot 3d predictions with prediction interval
@@ -82,7 +81,7 @@ def update(frame_id, dataframe, surf):
     ax.set_zlabel('End of Play Probability')
     ax.set_title('Tackle Probability with Prediction Interval')
     ax.view_init(30, 300)
-    ax.set_zlim([0, 1])
+    ax.set_zlim([0, max(zerror_upper)])
 
     for i in range(len(fy)):
         for xval, yval, zval, zerr_lower, zerr_upper in zip(x[i], y[i], z[i], zerror_lower[i], zerror_upper[i]):

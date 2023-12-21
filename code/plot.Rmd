@@ -225,8 +225,8 @@ plot_combine_play_contribution <- function(game_id, play_id) {
 ```
 
 ```{r}
-game_id = 2022110605
-play_id = 2397
+game_id = 2022090800
+play_id = 101
 
 plot_combine_play_contribution(game_id, play_id)
 plot_play(game_id, play_id)
@@ -243,16 +243,45 @@ pred_df <- read.csv(paste0("/Users/nickbachelder/Desktop/Personal Code/Kaggle/Ta
 pred_df %>% filter(omit==45287) %>%
   left_join(pred_df %>% filter(omit==0) %>% dplyr::select(frameId,exp_eop) %>% 
               dplyr::rename(exp_eop_orig = exp_eop)) %>% dplyr::select(frameId, exp_eop, exp_eop_orig, exp_contribution) %>% distinct()
+
+pred_df %>% filter(frameId == 6, omit == 0) %>% filter(prob > 0.05)
 ```
 
 
 
 
+$$\begin{bmatrix}
+    \begin{bmatrix} \mu_{x1}& \mu_{y1} \end{bmatrix} \\
+    . \\
+    .\\
+     \begin{bmatrix}  \mu_{xK}& \mu_{yK} \end{bmatrix}   \\
+\end{bmatrix} $$
+
+$$\begin{bmatrix}
+    \begin{bmatrix}
+    \sigma_{x1} & 0 \\
+    0 & \sigma_{y1}   \\
+\end{bmatrix} \\
+. \\
+. \\
+     \begin{bmatrix}
+    \sigma_{xK}& 0 \\
+     0 & \sigma_{yK}   \\
+\end{bmatrix}   \\
+\end{bmatrix} $$
+
+$$\begin{bmatrix}
+    p{1}\\
+    . \\
+    . \\
+     p{K}   \\
+\end{bmatrix} $$
 
 
-
-
-
+$$f(\text{End of Play}_i = \begin{bmatrix} x \\ y \end{bmatrix}) = \sum_{k=1}^{K}p_i \cdot \text{Normal}( \begin{bmatrix} x \\ y \end{bmatrix} ; \mu = \begin{bmatrix} \mu_{xk} \\ \mu_{yk} \end{bmatrix}, \Sigma = \begin{bmatrix}
+    \sigma_{xk}& 0 \\
+     0 & \sigma_{yk}   \\
+\end{bmatrix})  $$
 
 
 
@@ -352,5 +381,8 @@ for (trial in seq(1, 1000)) {
 mean(all_contained)
 ```
 
+```{r}
+tracking %>% filter(frameId >20)
+```
 
 
