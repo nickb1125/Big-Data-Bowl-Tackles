@@ -17,6 +17,7 @@ from scipy.stats import multivariate_normal
 from torchvision import transforms, utils, models
 from torch.distributions import MultivariateNormal, OneHotCategorical
 import torch.nn.init as init
+import concurrent.futures
 
 
 def plot_predictions(prediction_output, true):
@@ -35,9 +36,9 @@ def plot_predictions(prediction_output, true):
     # Loop through the 64 images and display each in a subplot
     for i in range(20):
         # Calculate the mixture bivariate PDF
-        pdf_values = np.array([probs[i][k]*np.exp(MultivariateNormal(means[i, k], cov[i,k]).log_prob(grid_points).detach().numpy())
-                                for k in range(means.shape[1])]) # (nmix, num_grid_points)
-        pdf = np.sum(pdf_values, axis = 0).view(120, 53)
+        pdf_values = np.array([(probs[i][k]*torch.exp(MultivariateNormal(means[i, k], cov[i,k]).log_prob(grid_points))).detach().numpy()
+                                for k in range(means.shape[1])]) # (nmix, num_grid_points)        
+        pdf = np.sum(pdf_values, axis = 0).reshape((120, 53))
         axs[i].imshow(pdf, cmap='Reds', interpolation='none')
         axs[i].axis('off')  # Turn off the axis for each subplot
         axs[i].set_title(f"Image {i + 1}")
@@ -187,40 +188,68 @@ class play:
         batch_images = self.get_full_play_tackle_image(N = model.N, without_player_id=without_player_id)
         outputs_all = model.predict_pdf(batch_images)
         return {'estimate' : outputs_all['overall_pred'], 'lower' : outputs_all['lower'], 'upper' : outputs_all['upper'], 
-                'all' : outputs_all['all_pred'], 'expected_x_stratified' : outputs_all['expected_stratified'][:, :, 1]}
+                'all' : outputs_all['all_pred']}
     
-    def get_expected_eop(self, predict_object):
-        expected_x_stratified = predict_object['expected_x_stratified'] 
-        expected_eop = np.sum(expected_x_stratified, axis = 0)
-        return expected_eop
+    def get_expected_eop(self, predict_object, return_all_model_results=False):
+        expected_x_stratified = predict_object['all'] 
+        num_mod, num_frame, rows, cols = np.indices(expected_x_stratified.shape)
+
+        # Calculate the mean coordinates
+        means_row = np.sum(rows * expected_x_stratified, axis = (2,3)) / np.sum(expected_x_stratified, axis = (2,3))
+        if return_all_model_results:
+            return means_row
+        return np.percentile(means_row, axis = 0, q = 2.5), np.mean(means_row, axis = 0), np.percentile(means_row, axis = 0, q = 97.5)
     
     def get_expected_contribution(self, model, original_predict_object, w_omission_all_pred):
-        orig_expected_x_stratified = original_predict_object['expected_x_stratified'] # expected value of each model orig
-        omit_expected_x_stratified = w_omission_all_pred['expected_x_stratified'] # expected value of each model
-        contributions = omit_expected_x_stratified - orig_expected_x_stratified # (num_model, num_frame)
-        lower = np.percentile(contributions, q=2.5, axis=0)
-        upper = np.percentile(contributions, q=97.5, axis=0)
-        estimate = np.mean(contributions, axis = 0)
-        return {'lower' : lower, 'upper' : upper, 'estimate' : estimate}
+        # Get contribution:
+        expected_omit = self.get_expected_eop(w_omission_all_pred, return_all_model_results=True)
+        expected_orig = self.get_expected_eop(original_predict_object, return_all_model_results=True)
+        contributions = expected_orig-expected_omit # num_mod, num_frame
+        if self.playDirection == 'left':
+            contributions = -contributions
+        print(f"Expected Contributions: {np.mean(contributions, axis = 0)}")
+
+        # -----------------------------------------
+        
+        # Get Sphere of Influence (number of square yards that are needed to account for 90% of the players influence)
+        # Step 1: Flatten the array
+        contribution_matrix = w_omission_all_pred['all'] - original_predict_object['all']
+        contribution_matrix[contribution_matrix < 0] = 0 # filter to positive influence (since influence should sum so 0)
+        flattened_array = contribution_matrix.reshape((model.num_models, self.num_frames-self.min_frame+1, -1))
+
+        # Step 2: Sort the flattened array in descending order
+        sorted_array = np.sort(flattened_array, axis=-1)[:, :, ::-1]
+
+        # Step 3: Calculate the cumulative sum
+        cumulative_sum = np.cumsum(sorted_array, axis=-1)
+
+        # Step 4: Find the index where cumulative sum exceeds 90% of the total sum
+        num_grid_points_90_percent = np.argmax(cumulative_sum >= 0.9 * np.sum(flattened_array, axis=-1)[:,:,np.newaxis], axis=-1)  + 1  # Add 1 because indexing starts from 0
+        print(f"Expected SOIs: {np.mean(num_grid_points_90_percent, axis = 0)}")
+        print("------------------------")
+        return {"contribution" : (np.percentile(contributions, axis = 0, q=2.5), np.mean(contributions, axis = 0), np.percentile(contributions, axis = 0, q = 97.5)),
+                "soi" : (np.percentile(num_grid_points_90_percent, axis = 0, q=2.5), np.mean(num_grid_points_90_percent, axis = 0), np.percentile(num_grid_points_90_percent, axis = 0, q = 97.5))}
     
     def get_plot_df(self, model):
         # Get df from original (i.e. no player replacement)
         original_no_omit = self.predict_tackle_distribution(model=model, without_player_id = 0)
-        exp_eop_orig = self.get_expected_eop(predict_object=original_no_omit)
+        lower_eop_orig, exp_eop_orig, upper_eop_orig = self.get_expected_eop(predict_object=original_no_omit)
         outputs_no_omit, lower_no_omit, upper_no_omit = original_no_omit['estimate'], original_no_omit['lower'], original_no_omit['upper']
         exp_contribution, lower_contribution, upper_contribution = np.zeros(len(range(self.min_frame, self.num_frames+1))), np.zeros(len(range(self.min_frame, self.num_frames+1))), np.zeros(len(range(self.min_frame, self.num_frames+1)))
-        exp_ret = array_to_field_dataframe(input_array=outputs_no_omit, N=1, marginalized=False)
+        exp_soi, lower_soi, upper_soi= np.zeros(len(range(self.min_frame, self.num_frames+1))), np.zeros(len(range(self.min_frame, self.num_frames+1))), np.zeros(len(range(self.min_frame, self.num_frames+1)))
+        exp_ret = array_to_field_dataframe(input_array=outputs_no_omit, N=1, for_features=False)
         exp_ret["type"] = "prob"
-        lower_ret = array_to_field_dataframe(input_array=lower_no_omit, N=1, marginalized=False)
+        lower_ret = array_to_field_dataframe(input_array=lower_no_omit, N=1, for_features=False)
         lower_ret['type'] = "lower"
-        upper_ret = array_to_field_dataframe(input_array=upper_no_omit, N=1, marginalized=False)
+        upper_ret = array_to_field_dataframe(input_array=upper_no_omit, N=1, for_features=False)
         upper_ret['type'] = "upper"
         ret_tackle_probs = pd.concat([exp_ret, lower_ret, upper_ret], axis = 0)
         ret_tackle_probs['omit'] = 0
         ret_tackle_probs['frameId'] = ret_tackle_probs['frameId']+self.min_frame
         ret_tackle_probs = ret_tackle_probs.pivot(index=['x', 'y', 'frameId', 'omit'], columns='type', values='prob').reset_index()
         ret_contribution = pd.DataFrame({"frameId" : range(self.min_frame, self.num_frames+1), "exp_eop" : exp_eop_orig, 
-                                         "exp_contribution" : exp_contribution, "lower_contribution" : lower_contribution, "upper_contribution" : upper_contribution})
+                                         "exp_contribution" : exp_contribution, "lower_contribution" : lower_contribution, "upper_contribution" : upper_contribution,
+                                         "exp_soi" : exp_soi, "lower_soi" : lower_soi, "upper_soi" : upper_soi})
         ret = ret_tackle_probs.merge(ret_contribution, how = "left", on = "frameId")
 
         output_list = [ret]
@@ -232,25 +261,28 @@ class play:
             print(self.playDirection)
             print(f"nflId: {id}")
             original = self.predict_tackle_distribution(model=model, without_player_id = id)
-            exp_eop = self.get_expected_eop(predict_object=original)
-            print(f"Expected original EOP frame 1: {exp_eop_orig[0]}")
-            print(f"Expected with ommitted EOP frame 1: {exp_eop[0]}")
-            original_contribution = self.get_expected_contribution(model=model, original_predict_object=original_no_omit, w_omission_all_pred=original)
+            lower_eop, exp_eop, upper_eop = self.get_expected_eop(predict_object=original)
+            print(f"Expected original EOP frame 1: {exp_eop_orig[0]} 95% CI: [{lower_eop_orig[0]}, {upper_eop_orig[0]}]")
+            print(f"Expected with ommitted EOP frame 1: {exp_eop[0]} 95% CI: [{lower_eop[0]}, {upper_eop[0]}")
+            metric_dict = self.get_expected_contribution(model=model, original_predict_object=original_no_omit, w_omission_all_pred=original)
+            lower_contribution, exp_contribution, upper_contribution = metric_dict["contribution"]
+            lower_soi, exp_soi, upper_soi = metric_dict["soi"]
             outputs, lower, upper = original['estimate']-outputs_no_omit, original['lower']-lower_no_omit, original['upper']-upper_no_omit
-            exp_contribution, lower_contribution, upper_contribution = original_contribution['estimate'], original_contribution['lower'], original_contribution['upper']
-            print(f"Expected average contribution: {np.mean(exp_contribution)} 95% CI: [{np.mean(lower_contribution), np.mean(upper_contribution)}]")
-            exp_ret = array_to_field_dataframe(input_array=outputs, N=1, marginalized=False)
+            print(f"Expected contribution frame 1: {exp_contribution[0]} 95% CI: [{lower_contribution[0]}, {upper_contribution[0]}]")
+            print(f"Expected SOI frame 1: {exp_soi[0]} 95% CI: [{lower_soi[0]}, {upper_soi[0]}]")
+            exp_ret = array_to_field_dataframe(input_array=outputs, N=1, for_features=False)
             exp_ret["type"] = "prob"
-            lower_ret = array_to_field_dataframe(input_array=lower, N=1, marginalized=False)
+            lower_ret = array_to_field_dataframe(input_array=lower, N=1, for_features=False)
             lower_ret['type'] = "lower"
-            upper_ret = array_to_field_dataframe(input_array=upper, N=1, marginalized=False)
+            upper_ret = array_to_field_dataframe(input_array=upper, N=1, for_features=False)
             upper_ret['type'] = "upper"
             ret_tackle_probs = pd.concat([exp_ret, lower_ret, upper_ret], axis = 0)
             ret_tackle_probs['omit'] = id
             ret_tackle_probs['frameId'] = ret_tackle_probs['frameId']+self.min_frame
             ret_tackle_probs = ret_tackle_probs.pivot(index=['x', 'y', 'frameId', 'omit'], columns='type', values='prob').reset_index()
-            ret_contribution = pd.DataFrame({"frameId" : range(self.min_frame, self.num_frames+1), "exp_eop" : exp_eop, 
-                                            "exp_contribution" : exp_contribution, "lower_contribution" : lower_contribution, "upper_contribution" : upper_contribution})
+            ret_contribution = pd.DataFrame({"frameId" : range(self.min_frame, self.num_frames+1), "exp_eop" : exp_eop_orig, 
+                                         "exp_contribution" : exp_contribution, "lower_contribution" : lower_contribution, "upper_contribution" : upper_contribution,
+                                         "exp_soi" : exp_soi, "lower_soi" : lower_soi, "upper_soi" : upper_soi})
             ret = ret_tackle_probs.merge(ret_contribution, how = "left", on = "frameId")
             output_list.append(ret)
             print("--------------------------------------------")
@@ -311,21 +343,38 @@ def get_player_field_densities(player_df, N, missing_id=0):
     return density_mat
     
     
-def array_to_field_dataframe(input_array, N, marginalized = False):
-    pred_list=[]
-    if marginalized:
-        for frame_id in range(input_array.shape[0]):
-            for x in range(input_array.shape[1]):
-                new_row = pd.DataFrame({"x" : [x*N+N/2], "prob" : [input_array[frame_id, x]], "frameId" : [frame_id]})
-                pred_list.append(new_row)
-        pred_df = pd.concat(pred_list, axis = 0)
-        return pred_df 
-    for frame_id in range(input_array.shape[0]):
-        for x in range(input_array.shape[1]):
-            for y in range(input_array.shape[2]):
-                new_row = pd.DataFrame({"x" : [x*N+N/2], "y" : [y*N+N/2], "prob" : [input_array[frame_id, x, y]], "frameId" : [frame_id]})
-                pred_list.append(new_row)
-    pred_df = pd.concat(pred_list, axis = 0)
+def array_to_field_dataframe(input_array, N, for_features=False):
+    pred_list = []
+    shape = input_array.shape
+    if for_features:
+        for frame_id in range(shape[0]):
+            for feature_num in range(shape[1]):
+                x_values = np.arange(0, shape[2]) * N + N/2
+                y_values = np.arange(0, shape[3]) * N + N/2
+                x, y = np.meshgrid(x_values, y_values, indexing='ij')
+                new_rows = pd.DataFrame({
+                    "x": x.flatten(),
+                    "y": y.flatten(),
+                    "feature_num": feature_num,
+                    'value': input_array[frame_id, feature_num, :, :].flatten(),
+                    "frameId": frame_id
+                })
+                pred_list.append(new_rows)
+        pred_df = pd.concat(pred_list, axis=0)
+    else:
+        for frame_id in range(shape[0]):
+            x_values = np.arange(0, shape[1]) * N + N/2
+            y_values = np.arange(0, shape[2]) * N + N/2
+            x, y = np.meshgrid(x_values, y_values, indexing='ij')
+            new_rows = pd.DataFrame({
+                "x": x.flatten(),
+                "y": y.flatten(),
+                "prob": input_array[frame_id, :, :].flatten(),
+                "frameId": frame_id
+            })
+            pred_list.append(new_rows)
+        pred_df = pd.concat(pred_list, axis=0)
+
     return pred_df
 
 def get_discrete_pdf_from_mvn(model):
@@ -356,64 +405,52 @@ def get_mixture_pdf(normal_models, pi_models):
 
 
 class TackleNetEnsemble:
-    def __init__(self, num_models, N):
+    def __init__(self, num_models, N, nmix):
         self.models = dict()
         self.N = N
         self.num_models = num_models
-        for mod_num in range(num_models):
-            with open(f"model_{mod_num}.pkl", 'rb') as f:
-                model = pickle.load(f)
+        for mod_num in range(1, num_models+1):
+            model = BivariateGaussianMixture(nmix=nmix, full_cov=True)
+            model.load_state_dict(torch.load(f'model_{mod_num}_weights.pth'))
+            model.eval()
             self.models.update({mod_num : model})
-    
+
     def predict_pdf(self, image):
         preds = []
-        pis = []
-        mus = []
-        sigmas = []
-        for mod_num in range(self.num_models):
-            model = self.models[mod_num]
-            pred = model(image)
-            # get variables for full ensemble gauccian mixture
-            pis.append(pred[0].probs.detach().numpy())
-            mus.append(pred[1].mean.detach().numpy())
-            sigmas.append(pred[1].covariance_matrix.detach().numpy())
-            # predict individually and average
-            pred = get_mixture_pdf(pred[1], pred[0])
-            preds.append(pred)
-        print("-----")
-        pis_combined = np.stack(pis)
-        pis_new = pis_combined.reshape((pis_combined.shape[1], pis_combined.shape[2]*self.num_models)) # (frames, num_mod*K)
-        mus_combined = np.stack(mus)
-        mus_new=mus_combined.reshape((mus_combined.shape[1], mus_combined.shape[2]*self.num_models, 2)) # (frames, num_mod*K, 2)
-        sigmas_combined = np.stack(sigmas) 
-        sigmas_new = sigmas_combined.reshape((sigmas_combined.shape[1], sigmas_combined.shape[2]*self.num_models, 2, 2)) # (frames, num_mod*K, 2, 2)
-        
-        # calculate expected values x
-        expected_vec_stratified = np.tile(pis_combined[..., np.newaxis], 2)*mus_combined # (num_mod, frames, K, 2)
-        expected_stratified = np.sum(expected_vec_stratified, axis = 2) # (num_mod, frames, 2) 
+        pis_list, mus_list, sigmas_list = [], [], []
 
-        # create object
-        mixture_ensemble_object = (OneHotCategorical(probs=torch.Tensor(pis_new/self.num_models)), 
-                                   MultivariateNormal(loc=torch.Tensor(mus_new), covariance_matrix=torch.Tensor(sigmas_new)))
-        # Get preds and confidence
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            # Process models in parallel
+            futures = [executor.submit(process_model, model, image) for model in self.models.values()]
+            for future in concurrent.futures.as_completed(futures):
+                pis, mus, sigmas, pred_pdf = future.result()
+                pis_list.append(pis)
+                mus_list.append(mus)
+                sigmas_list.append(sigmas)
+                preds.append(pred_pdf)
+
+        pis_combined = np.stack(pis_list)
+        mus_combined = np.stack(mus_list)
+        sigmas_combined = np.stack(sigmas_list)
+
+        # Reshape and compute new values
+        pis_new = pis_combined.reshape((pis_combined.shape[1], -1)) / self.num_models
+        mus_new = mus_combined.reshape((mus_combined.shape[1], -1, 2))
+        sigmas_new = sigmas_combined.reshape((sigmas_combined.shape[1], -1, 2, 2))
+
+        mixture_ensemble_object = (
+            OneHotCategorical(probs=torch.Tensor(pis_new)),
+            MultivariateNormal(loc=torch.Tensor(mus_new), covariance_matrix=torch.Tensor(sigmas_new))
+        )
+
         preds = np.stack(preds)
-        lower = np.percentile(preds, q = 2.75, axis = 0) 
-        overall_pred = np.mean(preds, axis = 0)
-        upper = np.percentile(preds, q = 97.5, axis = 0)
-        return {'overall_pred' : overall_pred, 'lower' : lower, 'upper' : upper, 
-                'all_pred' : preds, 'mixture_return' : mixture_ensemble_object, 'expected_stratified' : expected_stratified}
+        lower = np.percentile(preds, q=2.75, axis=0)
+        overall_pred = np.mean(preds, axis=0)
+        upper = np.percentile(preds, q=97.5, axis=0)
 
+        return {'overall_pred': overall_pred, 'lower': lower, 'upper': upper,
+                'all_pred': preds, 'mixture_return': mixture_ensemble_object}
     
-
-class GaussianMixtureEnsembleLogLoss(nn.Module):
-    def __init__(self):
-        super(GaussianMixtureLoss, self).__init__()
-
-    def forward(self, output, y):
-        pi_model, normal_model = output[0], output[1]
-        loglik = normal_model.log_prob(y.unsqueeze(1).expand_as(normal_model.loc))
-        loss = -torch.logsumexp(torch.log(pi_model.probs) + loglik, dim=1)
-        return loss.mean()
 
 class GaussianMixtureLoss(nn.Module):
     def __init__(self):
@@ -423,7 +460,7 @@ class GaussianMixtureLoss(nn.Module):
         pi_model, normal_model = output[0], output[1]
         loglik = normal_model.log_prob(y.unsqueeze(1).expand_as(normal_model.loc))
         loss = -torch.logsumexp(torch.log(pi_model.probs) + loglik, dim=1)
-        return loss.mean()
+        return loss.sum()
 
                 
 class BivariateGaussianMixture(nn.Module):
@@ -460,9 +497,9 @@ class BivariateGaussianMixture(nn.Module):
                             nn.Linear(50, nmix),
                         )
         self.elu = nn.ELU()
-        init.constant_(self.mu_net[-1].bias, 35)
-        init.constant_(self.cov_net[-1].bias, 10)
-
+        init.constant_(self.mu_net[-1].bias, 0) # sigmoid(0) = 0.5
+        init.constant_(self.cov_net[-1].bias, 15) # Start variance slow and let modes expand 
+        init.constant_(self.pi_net[-1].bias, 150)
 
     def forward(self, x):
         # print(f"OG Shape: {x.shape}")
@@ -488,7 +525,14 @@ class BivariateGaussianMixture(nn.Module):
         # print(f"Mixture Shape: {params.shape}")
         # print(f"Mixture Probs: {params[0]}")
         return OneHotCategorical(probs=params), MultivariateNormal(loc=mean, covariance_matrix=cov)
-
+    
+def process_model(model, image):
+    pred = model(image)
+    pis = pred[0].probs.detach().numpy()
+    mus = pred[1].mean.detach().numpy()
+    sigmas = pred[1].covariance_matrix.detach().numpy()
+    pred_pdf = get_mixture_pdf(normal_models=pred[1], pi_models=pred[0])
+    return pis, mus, sigmas, pred_pdf
     
 
 

@@ -104,37 +104,6 @@ plot_play <- function(game_id, play_id) {
     },movie.name="facet_zoom_2.gif",ani.width = 600, ani.height = 600)
 }
 
-plot_features <- function(game_id, play_id) {
-  features <- read.csv(paste0("/Users/nickbachelder/Desktop/Personal Code/Kaggle/Tackles/features_", game_id, "_", play_id, ".csv")) %>% 
-      dplyr::select(-X) %>% pivot_longer(cols = !c(x, y, frameId)) 
-    
-    oopt = ani.options(interval = 1/10)
-    saveGIF({for (i in 1:(max(features$frameId)-1)) {
-      image_this_frame <- features %>% filter(frameId == i) 
-      plots_list <- list()
-      # Iterate over unique feature names and create heat maps
-      for (feature_name in unique(image_this_frame$name)) {
-        feature_data <- subset(image_this_frame, name == feature_name)
-        
-        # Create a ggplot for each feature
-        plot <- ggplot(feature_data, aes(x = x, y = y, fill = value)) +
-          geom_tile() +
-          ggtitle(feature_name) +
-          scale_fill_gradient2(low = "mediumpurple1", mid = 'azure1', high = "red", midpoint = 0) + 
-          guides(fill="none") + theme_void() + xlab("") + ylab("")  # Adjust the color scale as needed
-        
-        # Append the plot to the list
-        plots_list[[feature_name]] <- plot
-      }
-      
-      # Arrange the plots using ggarrange
-      p <- ggarrange(plotlist = plots_list, ncol = 3, nrow = 4)
-      print(p)
-      print(paste0(i, " out of ", max(features$frameId) - 1))
-      ani.pause()}
-    }, movie.name="facet_zoom.gif",ani.width = 600, ani.height = 300)
-}
-
 plot_combine_play_contribution <- function(game_id, play_id) {
     pred_df <- read.csv(paste0("/Users/nickbachelder/Desktop/Personal Code/Kaggle/Tackles/", game_id, "_", play_id, ".csv")) %>% dplyr::select(-X) %>%
       mutate(x = as.numeric(x), y = as.numeric(y))
@@ -222,6 +191,37 @@ plot_combine_play_contribution <- function(game_id, play_id) {
       ani.pause()}
     },movie.name="facet_zoom_2.gif",ani.width = 600, ani.height = 600)
 }
+
+plot_features <- function(game_id, play_id) {
+  features <- read.csv(paste0("/Users/nickbachelder/Desktop/Personal Code/Kaggle/Tackles/features_", game_id, "_", play_id, ".csv")) %>% 
+      dplyr::select(-X)
+    
+    oopt = ani.options(interval = 1/10)
+    saveGIF({for (i in 1:(max(features$frameId)-1)) {
+      image_this_frame <- features %>% filter(frameId == i) 
+      plots_list <- list()
+      # Iterate over unique feature names and create heat maps
+      for (feature_name in unique(image_this_frame$feature_num)) {
+        feature_data <- subset(image_this_frame, feature_num == feature_name)
+        
+        # Create a ggplot for each feature
+        plot <- ggplot(feature_data, aes(x = x, y = y, fill = value)) +
+          geom_tile() +
+          ggtitle(feature_name) +
+          scale_fill_gradient2(low = "mediumpurple1", mid = 'azure1', high = "red", midpoint = 0) + 
+          guides(fill="none") + theme_void() + xlab("") + ylab("")  # Adjust the color scale as needed
+        
+        # Append the plot to the list
+        plots_list[[as.character(feature_name)]] <- plot
+      }
+      
+      # Arrange the plots using ggarrange
+      p <- ggarrange(plotlist = plots_list, ncol = 2, nrow = 3)
+      print(p)
+      print(paste0(i, " out of ", max(features$frameId) - 1))
+      ani.pause()}
+    }, movie.name="facet_zoom.gif",ani.width = 600, ani.height = 300)
+}
 ```
 
 ```{r}
@@ -230,6 +230,7 @@ play_id = 101
 
 plot_combine_play_contribution(game_id, play_id)
 plot_play(game_id, play_id)
+plot_features(game_id, play_id)
 ```
 
 
@@ -282,7 +283,6 @@ $$f(\text{End of Play}_i = \begin{bmatrix} x \\ y \end{bmatrix}) = \sum_{k=1}^{K
     \sigma_{xk}& 0 \\
      0 & \sigma_{yk}   \\
 \end{bmatrix})  $$
-
 
 
 
@@ -383,6 +383,17 @@ mean(all_contained)
 
 ```{r}
 tracking %>% filter(frameId >20)
+```
+
+
+```{r}
+loss_df <- read.csv("/Users/nickbachelder/Desktop/Personal Code/Kaggle/Tackles/test_loss_track.csv") 
+
+ggplot() + geom_line(data = loss_df, aes(x = frames_from_eop, y = test_loss, group = bag), alpha = 0.1) +
+  geom_line(data = loss_df %>% filter(frames_from_eop, bag == "overall"), 
+                         aes(group = frames_from_eop, y = test_loss)) + theme_classic() +
+  xlab("Frames from End of Play") + ylab("Negative Log Liklihood Loss")
+  
 ```
 
 
