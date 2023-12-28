@@ -21,15 +21,16 @@ import matplotlib.cm as cm
 from matplotlib.colors import Normalize
 
 prepredicted = False
-game_id = 2022090800
-play_id = 101
+game_id = 2022092503
+play_id = 2916
+
+print("Loading base data")
+print("-----------------")
+
+# Read and combine tracking data for all weeks
+tracking = pd.concat([pd.read_csv(f"data/nfl-big-data-bowl-2024/tracking_a_week_{week}.csv") for week in range(1, 10)])
 
 if not prepredicted:
-    print("Loading base data")
-    print("-----------------")
-
-    # Read and combine tracking data for all weeks
-    tracking = pd.concat([pd.read_csv(f"data/nfl-big-data-bowl-2024/tracking_a_week_{week}.csv") for week in range(1, 10)])
 
 
     print("Predicting")
@@ -43,7 +44,7 @@ if not prepredicted:
 
     # Define model
 
-    model = TackleNetEnsemble(num_models = 10, N = 1, nmix=5)
+    model = TackleNetEnsemble(num_models = 10, N = 3, nmix=5)
 
     all_pred = play_object.get_plot_df(model = model)
     all_pred.to_csv(f"{game_id}_{play_id}.csv")
@@ -57,8 +58,12 @@ else:
 
 
 ### plot 3d predictions with prediction interval
-
-def update(frame_id, dataframe, scatter):
+def update(frame_id, dataframe, scatter, ax):
+    tracking_now = tracking.query("gameId == @game_id & playId == @play_id & frameId == @frame_id")[['x', 'y', 'type']]
+    tracking_now_off = tracking_now.query("type == 'Offense'")
+    tracking_now_def = tracking_now.query("type == 'Defense'")
+    tracking_now_ball = tracking_now.query("type == 'Ball'")
+    
     center_density = dataframe.loc[dataframe.prob == max(dataframe.prob)][['x', 'y']]
     center_x, center_y = center_density.x.reset_index(drop=1)[0], center_density.y.reset_index(drop=1)[0]
     dataframe_now = dataframe
@@ -83,6 +88,10 @@ def update(frame_id, dataframe, scatter):
     x, y = np.meshgrid(fx, fy)
     ax.cla()
     ax.plot_surface(x, y, np.array(z), cmap="Reds", alpha=1)
+    ax.scatter(tracking_now_off['x'], tracking_now_off['y'], 0.003, c='black', marker='o', label='Tracking Points')
+    ax.scatter(tracking_now_def['x'], tracking_now_def['y'],0.003, c='grey', marker='o', label='Tracking Points')
+    ax.scatter(tracking_now_ball['x'], tracking_now_ball['y'], 0.003, c='red', marker='o', label='Tracking Points')
+    ax.plot_surface(x, y, np.full_like(z, 0.003), color="green", alpha=0.5)
 
     ax.set_xlabel('x')
     ax.set_ylabel('y')
@@ -93,10 +102,11 @@ def update(frame_id, dataframe, scatter):
         ax.plot_surface(x[i], y[i], np.array([zerror_upper[i], zerror_lower[i]]), color='grey', alpha=0.01)
 
     ax.set_box_aspect([2, 1, 1])
-    # ax.grid(False)
-    ax.set_zlim([0, 0.007])
+    ax.grid(False)
+    ax.set_zlim([0, 0.003])
 
-    return scatter
+    # Return a sequence of artists to be drawn
+    return scatter,
 
 # Set up the initial figure
 fig = plt.figure(figsize=(10, 10))
@@ -113,9 +123,8 @@ frames_to_animate = all_pred.frameId.unique()
 
 # Create the animation
 print("Animating.")
-animation = FuncAnimation(fig, update, frames=frames_to_animate, fargs=(all_pred, surf))
+animation = FuncAnimation(fig, update, frames=frames_to_animate, fargs=(all_pred, surf, ax), blit=False)
 print("Done.")
-
 
 # Save the animation as a GIF
 print("Saving.")

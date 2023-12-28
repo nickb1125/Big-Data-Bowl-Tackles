@@ -27,7 +27,7 @@ tracking = pd.concat([pd.read_csv(f"data/nfl-big-data-bowl-2024/tracking_a_week_
 plays = pd.read_csv("data/nfl-big-data-bowl-2024/plays.csv")
 plays = tracking[['gameId', 'playId']].drop_duplicates().merge(plays, how = 'left', on = ['gameId', 'playId'])
 # Define pretrained model
-model = TackleNetEnsemble(num_models = 10, N = 1, nmix=5)
+model = TackleNetEnsemble(num_models = 10, N = 3, nmix=5)
 
 # get play metrics
 week_9_games = tracking.query("week == 8").gameId.unique()
@@ -60,8 +60,8 @@ for index, play_row in tqdm(week_9_plays.iterrows(), total=len(week_9_plays), de
         all_player_dict[id]['lower_soi'].extend(lower_soi)
         all_player_dict[id]['upper_soi'].extend(upper_soi)
         
-        all_player_dict[id]['play_id'].append(play_row.playId)
-        all_player_dict[id]['game_id'].append(play_row.gameId)
+        all_player_dict[id]['play_id'].append(np.repeat(play_row.playId, len(exp_contriution)))
+        all_player_dict[id]['game_id'].append(np.repeat(play_row.gameId, len(exp_contriution)))
 
 with open(f"data/contribution_dict.pkl", f'wb') as outp:  # Overwrites any existing file.
     pickle.dump(all_player_dict, outp, pickle.HIGHEST_PROTOCOL)

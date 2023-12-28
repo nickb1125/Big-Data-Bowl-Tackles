@@ -94,22 +94,11 @@ class play:
         self.num_frames = max(self.tracking_df.frameId)
         self.eop = self.get_end_of_play_location()
         self.yardlines = np.array(self.tracking_df.query("displayName == 'football'").sort_values(by='frameId').x)
+        self.features_base_cache = dict()
 
     def get_end_of_play_location(self):
         end_of_play_carrier = self.tracking_df.query("nflId == @self.ball_carry_id & frameId == @self.num_frames")
         return end_of_play_carrier[["frameId", "x", "y"]].rename({"x" : "eop_x", "y" : "eop_y"}, axis = 1)
-    
-    def get_end_of_play_matrix(self, N):
-        tackles_attempt_mat = np.zeros((int(120/N), math.ceil(54/N)))
-        for item in list(zip(self.eop.eop_x, self.eop.eop_y)):
-            if item[0] >= 120:
-                item = list(item)
-                item[0] = 119
-            if item[1] >= 54:
-                item = list(item)
-                item[1] = 53
-            tackles_attempt_mat[int(item[0]/N), int(item[1]/N)] = 1
-        return tackles_attempt_mat
     
     def refine_tracking(self, frame_id):
         this_frame = self.tracking_df.query("frameId == @frame_id")
@@ -120,62 +109,112 @@ class play:
                 for player_type in ["Offense", "Defense", "Carrier"]}
 
     def get_grid_features(self, frame_id, N, plot = False, without_player_id = 0):
+        if self.features_base_cache == dict():
+            stratified_dfs = self.refine_tracking(frame_id = frame_id)
+            off_df = stratified_dfs["Offense"].reset_index(drop = 1)
+            def_df = stratified_dfs["Defense"].reset_index(drop = 1)
+            ball_df = stratified_dfs["Carrier"].reset_index(drop = 1)
 
-        stratified_dfs = self.refine_tracking(frame_id = frame_id)
-        off_df = stratified_dfs["Offense"]
-        def_df = stratified_dfs["Defense"]
-        ball_df = stratified_dfs["Carrier"]
+            distance_offense_from_ballcarrier = np.sqrt((off_df['x'] - ball_df['x'].values[0])**2 + (off_df['y'] - ball_df['y'].values[0])**2).tolist()
+            distance_defense_from_ballcarrier = np.sqrt((def_df['x'] - ball_df['x'].values[0])**2 + (def_df['y'] - ball_df['y'].values[0])**2).tolist()
+
+            off_movement_features = get_player_movement_features(off_df, N)
+            off_acc_mat = off_movement_features['field_weighted_acc']
+            off_vel_mat = off_movement_features['field_weighted_velocity']
+            #off_distance_mat = off_movement_features['distance']
+            #off_acc_mat_weight = (1/np.array(distance_offense_from_ballcarrier+0.001)[:, np.newaxis, np.newaxis] * off_acc_mat)
+            #off_vel_mat_weight = (1/np.array(distance_offense_from_ballcarrier+0.001)[:, np.newaxis, np.newaxis] * off_vel_mat)
+
+            def_movement_features = get_player_movement_features(def_df, N)
+            def_acc_mat = def_movement_features['field_weighted_acc']
+            def_vel_mat = def_movement_features['field_weighted_velocity']
+            #def_distance_mat = off_movement_features['distance']
+            #def_acc_mat_weight = (1/np.array(distance_defense_from_ballcarrier+0.001)[:, np.newaxis, np.newaxis] * def_acc_mat)
+            #def_vel_mat_weight = (1/np.array(distance_defense_from_ballcarrier+0.001)[:, np.newaxis, np.newaxis] * def_vel_mat)
+
+            ball_movement_features = get_player_movement_features(ball_df, N)
+            ball_acc_mat = ball_movement_features['field_weighted_acc']
+            ball_vel_mat = ball_movement_features['field_weighted_velocity']
+
+            off_density = get_player_field_densities(off_df, N)
+            def_density = get_player_field_densities(def_df, N)
+
+            self.features_base_cache.update({'off_density' : off_density, 'def_density' : def_density,
+                                            'ball_vel_mat' : ball_vel_mat, 'ball_acc_mat' : ball_acc_mat,
+                                            'off_vel_mat' : off_vel_mat, 'off_acc_mat' : off_acc_mat,
+                                            'def_vel_mat' : def_vel_mat, 'def_acc_mat' : def_acc_mat,
+                                            'distance_defense_from_ballcarrier' : distance_defense_from_ballcarrier,
+                                            'distance_offense_from_ballcarrier' : distance_offense_from_ballcarrier,
+                                            'def_df' : def_df})
+        else:
+            distance_offense_from_ballcarrier = self.features_base_cache['distance_offense_from_ballcarrier'].copy()
+            distance_defense_from_ballcarrier = self.features_base_cache['distance_defense_from_ballcarrier'].copy()
+            def_vel_mat = self.features_base_cache['def_vel_mat'].copy()
+            def_acc_mat = self.features_base_cache['def_acc_mat'].copy()
+            off_density = self.features_base_cache['off_density'].copy()
+            def_density = self.features_base_cache['def_density'].copy()
+            ball_vel_mat = self.features_base_cache['ball_vel_mat'].copy()
+            ball_acc_mat = self.features_base_cache['ball_acc_mat'].copy()
+            off_vel_mat = self.features_base_cache['off_vel_mat'].copy()
+            off_acc_mat = self.features_base_cache['off_acc_mat'].copy()
+
         if without_player_id != 0:
-            def_df = def_df.query("nflId != @without_player_id")
-
-        distance_offense_from_ballcarrier = np.sqrt((off_df['x'] - ball_df['x'].values[0])**2 + (off_df['y'] - ball_df['y'].values[0])**2)
-        distance_defense_from_ballcarrier = np.sqrt((def_df['x'] - ball_df['x'].values[0])**2 + (def_df['y'] - ball_df['y'].values[0])**2)
-        # Filter to 7 closest so that omitting a player will not bias results
-        closest = np.argsort(distance_defense_from_ballcarrier)[:11]
-        closest_off = np.argsort(distance_offense_from_ballcarrier)[:11]
-
-        off_movement_features = get_player_movement_features(off_df, N)
-        # off_acc_mat = off_movement_features['field_weighted_acc']
-        off_vel_mat = off_movement_features['field_weighted_velocity'][closest_off]
-        # off_distance_mat = off_movement_features['distance']
-        # off_acc_mat_weight = (1/np.array(distance_offense_from_ballcarrier+0.001)[:, np.newaxis, np.newaxis] * off_acc_mat)[closest_off]
-        # off_vel_mat_weight = (1/np.array(distance_offense_from_ballcarrier+0.001)[:, np.newaxis, np.newaxis] * off_vel_mat)[closest_off]
-
-        def_movement_features = get_player_movement_features(def_df, N)
-        # def_acc_mat = def_movement_features['field_weighted_acc']
-        def_vel_mat = def_movement_features['field_weighted_velocity'][closest]
-        # def_distance_mat = off_movement_features['distance']
-        # def_acc_mat_weight = (1/np.array(distance_defense_from_ballcarrier+0.001)[:, np.newaxis, np.newaxis] * def_acc_mat)[closest]
-        # def_vel_mat_weight = (1/np.array(distance_defense_from_ballcarrier+0.001)[:, np.newaxis, np.newaxis] * def_vel_mat)[closest]
-
-        ball_movement_features = get_player_movement_features(ball_df, N)
-        # ball_acc_mat = ball_movement_features['field_weighted_acc']
-        ball_vel_mat = ball_movement_features['field_weighted_velocity']
-
-        off_density = get_player_field_densities(off_df.iloc[closest_off], N)
-        def_density = get_player_field_densities(def_df.iloc[closest], N)
+            def_df = self.features_base_cache['def_df']
+            player_index = def_df[def_df['nflId'] == without_player_id].index[0]
+            distance_defense_from_ballcarrier = distance_defense_from_ballcarrier.copy()
+            distance_defense_from_ballcarrier.pop(player_index)
+            def_vel_mat = np.delete(def_vel_mat, player_index, axis = 0)
+            def_acc_mat = np.delete(def_acc_mat, player_index, axis = 0)
+        
+        # Filter to 12 closest
+        closest = np.argsort(distance_defense_from_ballcarrier)[:8]
+        closest_off = np.argsort(distance_offense_from_ballcarrier)[:8]
 
         ret = np.stack([
-                off_density, def_density, 
-                # np.min(off_distance_mat, axis = 0), np.min(def_distance_mat, axis = 0),
-                # np.mean(off_distance_mat, axis = 0), np.mean(def_distance_mat, axis = 0),
+                np.sum(off_density, axis=0), 
+                np.sum(def_density, axis=0),
                 np.sum(ball_vel_mat, axis = 0), 
-                # np.sum(ball_acc_mat, axis = 0),
-                np.sum(off_vel_mat, axis = 0), 
-                # np.max(off_acc_mat_weight, axis = 0), np.sum(off_acc_mat_weight, axis = 0), np.std(off_acc_mat, axis = 0),
-                np.sum(def_vel_mat, axis = 0)
-                # np.max(def_acc_mat_weight, axis = 0), np.sum(def_acc_mat_weight, axis = 0), np.std(def_acc_mat, axis = 0),
+                np.sum(ball_acc_mat, axis = 0),
+                np.sum(off_vel_mat[closest_off], axis = 0), 
+                np.sum(off_acc_mat[closest_off], axis = 0), 
+                np.sum(def_vel_mat[closest], axis = 0),
+                np.sum(def_acc_mat[closest], axis = 0),
                 ])
         if not plot:
             return ret
         else:
-            fig, axes = plt.subplots(nrows=6, ncols=3, figsize=(10, 10))
+            fig, axes = plt.subplots(nrows=2, ncols=4, figsize=(10, 10))
             for i, ax in enumerate(axes.flat):
-                ax.imshow(ret[i, :, :], cmap='viridis')
+                img = ax.imshow(ret[i, :, :], cmap='viridis')
                 ax.set_title(f'Dimension {i + 1}')
+                img.set_clim(vmin=0, vmax=1)
 
             # Adjust layout for better visualization
             plt.tight_layout()
+            plt.show()
+
+            ret = ret[3:7, :, :]
+            # Create a figure and 3D axis
+            fig = plt.figure(figsize=(8, 6))
+            ax = fig.add_subplot(111, projection='3d')
+
+            # Plot each image in the 3D stack
+            for i in range(ret.shape[0]):
+                x = np.arange(ret.shape[2])
+                y = np.arange(ret.shape[1])
+                X, Y = np.meshgrid(x, y)
+
+                # Flatten the 2D arrays to 1D and use them as coordinates
+                Z = np.ones_like(X) * i
+                ax.plot_surface(X, Y, Z, facecolors=plt.cm.cool(ret[i]), rstride=1, cstride=1, alpha=0.5, antialiased=False)
+
+            # Set labels and title
+            ax.grid(False)
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.set_zticks([])
+            ax.view_init(elev=20, azim=45)
+
             plt.show()
 
     def get_full_play_tackle_image(self, N, without_player_id = 0):
@@ -205,9 +244,9 @@ class play:
         expected_omit = self.get_expected_eop(w_omission_all_pred, return_all_model_results=True)
         expected_orig = self.get_expected_eop(original_predict_object, return_all_model_results=True)
         contributions = expected_orig-expected_omit # num_mod, num_frame
-        if self.playDirection == 'left':
-            contributions = -contributions
-        print(f"Expected Contributions: {np.mean(contributions, axis = 0)}")
+        #if self.playDirection == 'left':
+        #    contributions = -contributions
+        #print(f"Expected Contributions: {np.mean(contributions, axis = 0)}")
 
         # -----------------------------------------
         
@@ -225,8 +264,8 @@ class play:
 
         # Step 4: Find the index where cumulative sum exceeds 90% of the total sum
         num_grid_points_90_percent = np.argmax(cumulative_sum >= 0.9 * np.sum(flattened_array, axis=-1)[:,:,np.newaxis], axis=-1)  + 1  # Add 1 because indexing starts from 0
-        print(f"Expected SOIs: {np.mean(num_grid_points_90_percent, axis = 0)}")
-        print("------------------------")
+        #print(f"Expected SOIs: {np.mean(num_grid_points_90_percent, axis = 0)}")
+        #print("------------------------")
         return {"contribution" : (np.percentile(contributions, axis = 0, q=2.5), np.mean(contributions, axis = 0), np.percentile(contributions, axis = 0, q = 97.5)),
                 "soi" : (np.percentile(num_grid_points_90_percent, axis = 0, q=2.5), np.mean(num_grid_points_90_percent, axis = 0), np.percentile(num_grid_points_90_percent, axis = 0, q = 97.5))}
     
@@ -329,14 +368,16 @@ def get_player_movement_features(player_df, N):
     return {'distance' : distance_mat, 'field_weighted_velocity': once_weighted_velocity_mat, 
             'field_weighted_acc' : once_weighted_acceleration_mat}
 
-def get_player_field_densities(player_df, N, missing_id=0):
-    density_mat = np.zeros((len(list(range(0, 54, N))), len(list(range(0, 120, N)))))
+def get_player_field_densities(player_df, N):
+    density_mat = np.zeros((player_df.shape[0], len(list(range(0, 54, N))), len(list(range(0, 120, N)))))
     for index, row in player_df.iterrows():
         x_rounded = math.floor(row.x / N)
         y_rounded = math.floor(row.y / N)
         try:
-            density_mat[y_rounded, x_rounded] += 1
+            density_mat[index, y_rounded, x_rounded] += 1
         except:
+            print(player_df.shape[0])
+            print(index)
             print(y_rounded)
             print(x_rounded)
             raise ValueError
@@ -378,23 +419,19 @@ def array_to_field_dataframe(input_array, N, for_features=False):
     return pred_df
 
 def get_discrete_pdf_from_mvn(model):
-    coordinates = np.floor(model.sample(sample_shape=torch.Size([10000]))).detach().numpy()
-    condition_x = (coordinates[:,0] >= 0) & (coordinates[:,0] < 53.3)
-    condition_y = (coordinates[:,1] >= 0) & (coordinates[:,1] < 120)
-    valid_indices = (condition_x & condition_y)
-    coordinates = coordinates[valid_indices, :]
-    grid = np.zeros((120, 54), dtype=int)
-    x_indices = coordinates[:, 0].astype(int)
-    y_indices = coordinates[:, 1].astype(int)
-    np.add.at(grid, (y_indices, x_indices), 1)
-    discrete_pdf = grid / len(coordinates)
+    x, y = np.meshgrid(np.linspace(0, 54, 54), np.linspace(0, 120, 120))
+    coordinates = torch.Tensor(np.column_stack((x.ravel(), y.ravel())))
+    pdf_values = np.exp(model.log_prob(coordinates).detach().numpy()).reshape(120, 54)
+    if np.sum(pdf_values) < 0.0001:
+        return np.zeros((120, 54))
+    discrete_pdf = pdf_values / np.sum(pdf_values)
+
     return discrete_pdf
 
 def get_mixture_pdf(normal_models, pi_models):
     mean = normal_models.mean # (Batch, Nmix, 2)
     cov = normal_models.covariance_matrix # (Batch, Nmix, 2, # (Batch, Nmix, 2))
     probs = pi_models.probs # (Batch, Nmix)
-    x, y = torch.meshgrid(torch.linspace(0, 120, 120), torch.linspace(0, 53, 53))
     pdfs = np.zeros((mean.shape[0], 120, 54))
     for batch in range(mean.shape[0]):
         pdf_values = np.array([probs[batch][k].detach().numpy()*get_discrete_pdf_from_mvn(MultivariateNormal(mean[batch, k], cov[batch,k]))
@@ -467,47 +504,49 @@ class BivariateGaussianMixture(nn.Module):
     def __init__(self, nmix, full_cov=True):
         super().__init__()
         self.nmix = nmix
-        self.conv1 = nn.Conv2d(5, 3, kernel_size=3, padding=1)
+        self.conv1 = nn.Conv2d(8, 3, kernel_size=3, padding=1)
         self.conv2 = nn.Conv2d(3, 1, kernel_size=3, padding=1)
         self.pool1 = nn.MaxPool2d(kernel_size = 3, stride=1) 
         self.pool2 = nn.MaxPool2d(kernel_size = 3, stride=1)  
         self.pool3 = nn.MaxPool2d(kernel_size = 3, stride=1)          
-        self.dropout1 = nn.Dropout(0.5)
-        self.dropout2 = nn.Dropout(0.8)
+        self.dropout1 = nn.Dropout(0.3)
+        self.dropout2 = nn.Dropout(0.3)
         self.resnet = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
         self.mu_net = nn.Sequential(
-                            nn.Linear(5800, 100),
+                            nn.Linear(504, 50),
                             nn.ReLU(),
-                            nn.Linear(100, 50),
+                            nn.Linear(50, 10),
                             nn.ReLU(),
-                            nn.Linear(50, nmix * 2),
+                            nn.Linear(10, nmix * 2),
                         )
         self.cov_net = nn.Sequential(
-                            nn.Linear(5800, 100),
+                            nn.Linear(504, 50),
                             nn.ReLU(),
-                            nn.Linear(100, 50),
+                            nn.Linear(50, 10),
                             nn.ReLU(),
-                            nn.Linear(50, nmix * 2),
+                            nn.Linear(10, nmix * 2),
                         )
         self.pi_net = nn.Sequential(
-                            nn.Linear(5800, 100),
+                            nn.Linear(504, 50),
                             nn.ReLU(),
-                            nn.Linear(100, 50),
+                            nn.Linear(50, 10),
                             nn.ReLU(),
-                            nn.Linear(50, nmix),
+                            nn.Linear(10, nmix),
                         )
         self.elu = nn.ELU()
         init.constant_(self.mu_net[-1].bias, 0) # sigmoid(0) = 0.5
-        init.constant_(self.cov_net[-1].bias, 15) # Start variance slow and let modes expand 
-        init.constant_(self.pi_net[-1].bias, 150)
+        init.constant_(self.cov_net[-1].bias, 10) # Start variance slow and let modes expand 
+        # init.constant_(self.pi_net[-1].bias, 150)
 
     def forward(self, x):
-        # print(f"OG Shape: {x.shape}")
+        #print(f"OG Shape: {x.shape}")
         x = self.conv1(x)
+        #print(f"After Conv Shape: {x.shape}")
         x = self.pool1(x)
         x = self.conv2(x)
         x = self.pool2(x)
         x = x.view(x.size(0), -1)
+        #print(f"After Flatten Shape: {x.shape}")
         
         # print(f"After Encoder Shape: {x.shape}")
         field_scaler = torch.stack([torch.Tensor([53.3, 120])] * self.nmix, dim=0)
@@ -534,6 +573,40 @@ def process_model(model, image):
     pred_pdf = get_mixture_pdf(normal_models=pred[1], pi_models=pred[0])
     return pis, mus, sigmas, pred_pdf
     
+def plot_random_ensemble_predictions_all(tracking, model):
+    random_instant = tracking[['gameId', 'playId', 'frameId']].drop_duplicates().sample(n=1)
+    frame_id = random_instant.frameId.reset_index(drop = 1)[0]
+    game_id = random_instant.gameId.reset_index(drop = 1)[0]
+    play_id = random_instant.playId.reset_index(drop = 1)[0]
+    print(f"GameId : {game_id}")
+    print(f"PlayId : {play_id}")
+    print(f"FrameId : {frame_id}")
+
+    play_object = play(game_id, play_id, tracking)
+    true_x = play_object.eop['eop_x'].reset_index(drop=1)[0]
+    true_y = play_object.eop['eop_y'].reset_index(drop=1)[0]
+    frame_id = frame_id - play_object.min_frame
+
+    # Plot all models
+    pred = play_object.predict_tackle_distribution(model, 0)
+    data = pred['all'][:, frame_id, :, :]
+    fig, axes = plt.subplots(2, 5, figsize=(10, 4))
+    axes = axes.flatten()
+    for i in range(10):
+        axes[i].imshow(data[i, :, :], cmap='Reds')  # Change cmap as needed
+        axes[i].axis('off')  # Turn off axis labels
+        axes[i].set_title(f'Model {i + 1}')
+        axes[i].plot(true_y, true_x, 'ro', markersize=1, color='blue')
+    plt.tight_layout()
+    plt.show()
+
+    # Plot ensemble
+    data = pred['estimate'][frame_id, :, :]
+    plt.imshow(data, cmap='Reds')  # Change cmap as needed
+    plt.plot(true_y, true_x, 'ro', markersize=1, color='blue')
+    plt.axis('off')  # Turn off axis labels
+    plt.title('Ensemble')
+    plt.show()
 
 
 

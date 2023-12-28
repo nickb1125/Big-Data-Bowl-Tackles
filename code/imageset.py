@@ -26,7 +26,7 @@ tracking = pd.concat([pd.read_csv(f"data/nfl-big-data-bowl-2024/tracking_a_week_
 plays = tracking[['gameId', 'playId']].drop_duplicates().merge(plays, how = 'left', on = ['gameId', 'playId'])
 
 load_test = True
-N = 5
+N = 3
 test_games = tracking.query("week == 9").gameId.unique()
 test_plays = plays.query("(gameId in @test_games)")
 train_val_games = tracking.query("week != 9").gameId.unique()
@@ -47,7 +47,7 @@ if load_test:
             frame_dict[frames_from_end]['play_ids'].append(play_row.playId)
             frame_dict[frames_from_end]['frame_ids'].append(frame_id)
             try:
-                image = play_object.get_grid_features(frame_id = frame_id, N = 1)
+                image = play_object.get_grid_features(frame_id = frame_id, N = N)
             except ValueError:
                 # print("Below is lacking a type of position and is being omitted, check if desired...")
                 # print(row)
@@ -92,7 +92,7 @@ for bag in range(10):
         play_ids.append(play_row.playId)
         frame_ids.append(frame_id)
         try:
-            image = play_object.get_grid_features(frame_id = frame_id, N = 1)
+            image = play_object.get_grid_features(frame_id = frame_id, N = N)
         except ValueError:
             # print("Below is lacking a type of position and is being omitted, check if desired...")
             # print(row)
