@@ -11,7 +11,7 @@ for week in range(1, 10):
     print(f"Augmenting tracking for week {week}...")
     tracking = pd.read_csv(f"data/nfl-big-data-bowl-2024/tracking_week_{week}.csv")
     tracking.loc[tracking['playDirection'] == 'left', 'x'] = 120 - tracking['x']
-    tracking.loc[tracking['playDirection'] == 'left', 'dir'] = (180 - tracking['dir']) % 360
+    tracking.loc[tracking['playDirection'] == 'left', 'dir'] = (360 - tracking['dir']) % 360 # x y switched so use 360
     tracking.loc[tracking['x'] > 111, 'x'] = 111
     tracking.loc[tracking['x'] < 9, 'x'] = 9
     tracking.loc[tracking['x'] < 0, 'y'] = 0
@@ -42,9 +42,9 @@ for week in range(1, 10):
     current_positions['type'] = current_positions.apply(lambda row: 'Ball' if pd.isna(row['nflId']) else row['type'], axis=1)
     current_positions.loc[current_positions.nflId == current_positions.ballCarrierId, 'type'] = "Carrier"
     current_positions['dir_rad'] = np.radians(current_positions['dir']) # fix degrees
-    current_positions['Sx'] = current_positions['s'] * np.cos(current_positions['dir_rad'])
-    current_positions['Sy'] = current_positions['s'] * np.sin(current_positions['dir_rad'])
-    current_positions['Ax'] = current_positions['a'] * np.cos(current_positions['dir_rad'])
-    current_positions['Ay'] = current_positions['a'] * np.sin(current_positions['dir_rad'])
+    current_positions['Sy'] = current_positions['s'] * np.cos(current_positions['dir_rad']) # x y axis switched
+    current_positions['Sx'] = current_positions['s'] * np.sin(current_positions['dir_rad'])
+    current_positions['Ay'] = current_positions['a'] * np.cos(current_positions['dir_rad'])
+    current_positions['Ax'] = current_positions['a'] * np.sin(current_positions['dir_rad'])
 
     current_positions.to_csv(f"data/nfl-big-data-bowl-2024/tracking_a_week_{week}.csv")

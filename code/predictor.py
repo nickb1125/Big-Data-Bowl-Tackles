@@ -21,8 +21,8 @@ import matplotlib.cm as cm
 from matplotlib.colors import Normalize
 
 prepredicted = False
-game_id = 2022092503
-play_id = 2916
+game_id = 2022103012
+play_id = 1919
 
 print("Loading base data")
 print("-----------------")
@@ -50,7 +50,7 @@ if not prepredicted:
     all_pred.to_csv(f"{game_id}_{play_id}.csv")
     feat = play_object.get_full_play_tackle_image(N = 1)
     feat_df = array_to_field_dataframe(input_array=feat, N=1, for_features=True)
-    feat_df.to_csv(f"features_{game_id}_{play_id}.csv")
+    feat_df.to_csv(f"/Users/nickbachelder/Desktop/Personal Code/Kaggle/Tackles/features_{game_id}_{play_id}.csv")
 else:
     print("Reading in data.")
     all_pred = pd.read_csv(f"{game_id}_{play_id}.csv")
@@ -64,13 +64,10 @@ def update(frame_id, dataframe, scatter, ax):
     tracking_now_def = tracking_now.query("type == 'Defense'")
     tracking_now_ball = tracking_now.query("type == 'Ball'")
     
-    center_density = dataframe.loc[dataframe.prob == max(dataframe.prob)][['x', 'y']]
-    center_x, center_y = center_density.x.reset_index(drop=1)[0], center_density.y.reset_index(drop=1)[0]
-    dataframe_now = dataframe
-    fx = sorted(dataframe_now['x'].unique())[2::1]
-    fy = sorted(dataframe_now['y'].unique())[4::1]
+    dataframe_now = dataframe.query("(frameId == @frame_id) & (omit == 0)")
+    fx = sorted(dataframe_now['x'].unique())
+    fy = sorted(dataframe_now['y'].unique())
     z, zerror_lower, zerror_upper = [], [], []
-    dataframe_now = dataframe.query("(frameId == @frame_id)")
 
     for y_val in fy:
         row_data, error_lower_data, error_upper_data = [], [], []
@@ -88,10 +85,10 @@ def update(frame_id, dataframe, scatter, ax):
     x, y = np.meshgrid(fx, fy)
     ax.cla()
     ax.plot_surface(x, y, np.array(z), cmap="Reds", alpha=1)
-    ax.scatter(tracking_now_off['x'], tracking_now_off['y'], 0.003, c='black', marker='o', label='Tracking Points')
-    ax.scatter(tracking_now_def['x'], tracking_now_def['y'],0.003, c='grey', marker='o', label='Tracking Points')
-    ax.scatter(tracking_now_ball['x'], tracking_now_ball['y'], 0.003, c='red', marker='o', label='Tracking Points')
-    ax.plot_surface(x, y, np.full_like(z, 0.003), color="green", alpha=0.5)
+    ax.scatter(tracking_now_off['x'], tracking_now_off['y'], np.max(z), c='black', marker='o', label='Tracking Points')
+    ax.scatter(tracking_now_def['x'], tracking_now_def['y'], np.max(z), c='grey', marker='o', label='Tracking Points')
+    ax.scatter(tracking_now_ball['x'], tracking_now_ball['y'], np.max(z), c='red', marker='o', label='Tracking Points')
+    ax.plot_surface(x, y, np.full_like(z, np.max(z)), color="grey", alpha=0.5)
 
     ax.set_xlabel('x')
     ax.set_ylabel('y')
@@ -103,7 +100,7 @@ def update(frame_id, dataframe, scatter, ax):
 
     ax.set_box_aspect([2, 1, 1])
     ax.grid(False)
-    ax.set_zlim([0, 0.003])
+    ax.set_zlim([0, np.max(z)])
 
     # Return a sequence of artists to be drawn
     return scatter,

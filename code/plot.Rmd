@@ -193,40 +193,91 @@ plot_combine_play_contribution <- function(game_id, play_id) {
 }
 
 plot_features <- function(game_id, play_id) {
-  features <- read.csv(paste0("/Users/nickbachelder/Desktop/Personal Code/Kaggle/Tackles/features_", game_id, "_", play_id, ".csv")) %>% 
-      dplyr::select(-X)
-    
+    features <- read.csv(paste0("/Users/nickbachelder/Desktop/Personal Code/Kaggle/Tackles/features_", game_id, "_", play_id, ".csv")) %>% 
+      dplyr::select(-X) %>% dplyr::rename(y = x, x = y) %>% group_by(feature_num) %>%
+      mutate(value = (value - min(value)) / max(value) - min(value)) %>% ungroup()
+    play_df <- tracking %>% filter(gameId == game_id, playId == play_id) %>%
+      dplyr::mutate(type = case_when(position %in% c("QB", "TE",  "WR", "G", "OLB", "RB", "C", "FB") ~ "offense", 
+                               is.na(nflId) ~ "ball",
+                               TRUE ~ "defense"))
+    describe <- (plays %>% filter(gameId == game_id, playId == play_id))$playDescription[1]
+    all_frames <- unique(play_df$frameId)
     oopt = ani.options(interval = 1/10)
-    saveGIF({for (i in 1:(max(features$frameId)-1)) {
-      image_this_frame <- features %>% filter(frameId == i) 
-      plots_list <- list()
+    saveGIF({for (i in min(all_frames):max(all_frames)) {
+      play_df_frame <- play_df %>% filter(frameId == i)
+      min_x = 10
+      max_x = 110
+      min_y = 0
+      max_y = 54
+      main <- ggplot() + geom_tile(data = data.frame(expand.grid(x=seq(0, 120), y=seq(0, 54))) %>% mutate(prob = 0), 
+                                   aes(x = x, y = y, fill = prob), width = 10, height = 10)
+      main <- main +
+        scale_fill_gradient(low = "black", high = "brown1", limits = c(0, 10)) +
+            geom_vline(aes(xintercept = seq(round_any(min_x, 5, f = floor), 
+                                          round_any(max_x, 5, f = ceiling), by = 5)), 
+                     color = 'white') +
+          geom_segment(aes(x = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
+                           y = rep(70.9 / 3 - 0.5, length(seq(round_any(min_x, 5, f = floor), 
+                                                                 round_any(max_x, 5, f = ceiling), by = 1 )) ), 
+                           xend = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
+                           yend = rep(70.9 / 3 + 0.5, length(seq(round_any(min_x, 5, f = floor), 
+                                                                 round_any(max_x, 5, f = ceiling), by = 1 ))) ), 
+                       color = 'white') +
+          geom_segment(aes(x = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
+                           y = rep(70.8 / 3 + 18.5 / 3 - 0.5, length(seq(round_any(min_x, 5, f = floor), 
+                                                                 round_any(max_x, 5, f = ceiling), by = 1 )) ), 
+                           xend = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
+                           yend = rep(70.8 / 3 + 18.5 / 3 + 0.5, length(seq(round_any(min_x, 5, f = floor), 
+                                                                 round_any(max_x, 5, f = ceiling), by = 1 ))) ), 
+                       color = 'white') + ylab("") + xlab("") + 
+        geom_hline(yintercept = 0, color = 'white')  + geom_hline(yintercept = 54, color = 'white') + geom_vline(xintercept = 0, color = 'white') + 
+        geom_vline(xintercept = 120, color = 'white')  + 
+        geom_point(data = play_df_frame, aes(x = x, y = y, size = type, color = type, shape = type))  +
+        scale_shape_manual(values = c(20, 18, 18)) +
+        scale_size_manual(values = c(2, 5, 5)) +
+        scale_color_manual(values = c("white", "cornflowerblue", "lightseagreen")) +
+        labs(title = "Tackle Classifier Example", x = "", y = "", caption = describe) + xlim(0, 120) + ylim(0, 54) + theme_minimal() 
+      image_this_frame <- features %>% filter(frameId == i-min(all_frames)) 
+      plot_list <- list()
       # Iterate over unique feature names and create heat maps
-      for (feature_name in unique(image_this_frame$feature_num)) {
-        feature_data <- subset(image_this_frame, feature_num == feature_name)
-        
-        # Create a ggplot for each feature
-        plot <- ggplot(feature_data, aes(x = x, y = y, fill = value)) +
-          geom_tile() +
-          ggtitle(feature_name) +
-          scale_fill_gradient2(low = "mediumpurple1", mid = 'azure1', high = "red", midpoint = 0) + 
-          guides(fill="none") + theme_void() + xlab("") + ylab("")  # Adjust the color scale as needed
-        
-        # Append the plot to the list
-        plots_list[[as.character(feature_name)]] <- plot
+      iter = 1
+      for (feature_name in unique(image_this_frame$feature_num))  {
+        feature_data <- subset(image_this_frame, feature_num == feature_name) 
+        p <- ggplot() + ggtitle(feature_name) +
+          geom_raster(data=feature_data, aes(x = x, y = y, fill = value),interpolate = TRUE) +
+            geom_vline(aes(xintercept = seq(round_any(min_x, 5, f = floor), 
+                                          round_any(max_x, 5, f = ceiling), by = 5)), 
+                     color = 'white') +
+          geom_segment(aes(x = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
+                           y = rep(70.9 / 3 - 0.5, length(seq(round_any(min_x, 5, f = floor), 
+                                                                 round_any(max_x, 5, f = ceiling), by = 1 )) ), 
+                           xend = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
+                           yend = rep(70.9 / 3 + 0.5, length(seq(round_any(min_x, 5, f = floor), 
+                                                                 round_any(max_x, 5, f = ceiling), by = 1 ))) ), 
+                       color = 'white') +
+          geom_segment(aes(x = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
+                           y = rep(70.8 / 3 + 18.5 / 3 - 0.5, length(seq(round_any(min_x, 5, f = floor), 
+                                                                 round_any(max_x, 5, f = ceiling), by = 1 )) ), 
+                           xend = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
+                           yend = rep(70.8 / 3 + 18.5 / 3 + 0.5, length(seq(round_any(min_x, 5, f = floor), 
+                                                                 round_any(max_x, 5, f = ceiling), by = 1 ))) ), 
+                       color = 'white') +xlim(0,120)  + theme_void() + theme(legend.position = "none") + 
+          scale_fill_gradient(low = "black", high = "dodgerblue2", limits = c(0, 0.05), oob = scales::squish)
+        plot_list[[iter]] <- p
+        iter = iter+1
       }
-      
-      # Arrange the plots using ggarrange
-      p <- ggarrange(plotlist = plots_list, ncol = 2, nrow = 3)
-      print(p)
-      print(paste0(i, " out of ", max(features$frameId) - 1))
+      arranged_plots <- ggarrange(plotlist = plot_list, ncol = 2, nrow = 4)
+      arranged_plots2 <-ggarrange(plotlist = list(main, arranged_plots), ncol = 1, nrow = 2)
+      print(arranged_plots2)
+      print(paste0("Frame ", i))
       ani.pause()}
-    }, movie.name="facet_zoom.gif",ani.width = 600, ani.height = 300)
-}
+    },movie.name="facet_zoom_2.gif",ani.width = 600, ani.height = 600)
+} 
 ```
 
 ```{r}
-game_id = 2022090800
-play_id = 101
+game_id=2022103012
+play_id=1919
 
 plot_combine_play_contribution(game_id, play_id)
 plot_play(game_id, play_id)
@@ -246,6 +297,8 @@ pred_df %>% filter(omit==45287) %>%
               dplyr::rename(exp_eop_orig = exp_eop)) %>% dplyr::select(frameId, exp_eop, exp_eop_orig, exp_contribution) %>% distinct()
 
 pred_df %>% filter(frameId == 6, omit == 0) %>% filter(prob > 0.05)
+
+pred_df %>% filter(omit == 0, frameId == 7) %>% ggplot() + geom_tile(aes(x= x, y=y, fill=prob))
 ```
 
 

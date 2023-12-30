@@ -30,7 +30,7 @@ plays = tracking[['gameId', 'playId']].drop_duplicates().merge(plays, how = 'lef
 model = TackleNetEnsemble(num_models = 10, N = 3, nmix=5)
 
 # get play metrics
-week_9_games = tracking.query("week == 8").gameId.unique()
+week_9_games = tracking.query("week == 9").gameId.unique()
 week_9_plays = plays.query("(gameId in @week_9_games)")
 
 print("Getting metrics")
