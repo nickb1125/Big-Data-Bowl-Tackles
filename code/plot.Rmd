@@ -53,57 +53,6 @@ plot_marginal_contribution <- function(game_id, play_id) {
     },movie.name="facet_zoom_2.gif",ani.width = 600, ani.height = 600)
 }
 
-plot_play <- function(game_id, play_id) {
-  pred_df <- read.csv(paste0("/Users/nickbachelder/Desktop/Personal Code/Kaggle/Tackles/", game_id, "_", play_id, ".csv")) %>% dplyr::select(-X) %>%
-      mutate(x = as.numeric(x), y = as.numeric(y))
-  play_df <- tracking %>% filter(gameId == game_id, playId == play_id) %>%
-      dplyr::mutate(type = case_when(position %in% c("QB", "TE",  "WR", "G", "OLB", "RB", "C", "FB") ~ "offense", 
-                               is.na(nflId) ~ "ball",
-                               TRUE ~ "defense"))
-    describe <- (plays %>% filter(gameId == game_id, playId == play_id))$playDescription[1]
-    all_frames <- unique(play_df$frameId)
-    max_p <- max(pred_df$prob)
-    oopt = ani.options(interval = 1/10)
-    saveGIF({for (i in min(all_frames):max(all_frames)) {
-      play_df_frame <- play_df %>% filter(frameId == i)
-      pred_df_frame <- pred_df %>% filter(frameId == i, omit == 0) 
-      min_x = 10
-      max_x = 110
-      min_y = 0
-      max_y = 54
-      main <- ggplot() + geom_tile(data = pred_df_frame, aes(x = x, y = y, fill = prob), width = 10, height = 10)
-      main <- main +
-        scale_fill_gradient(low = "grey", high = "brown1", limits = c(0, max_p)) +
-            geom_vline(aes(xintercept = seq(round_any(min_x, 5, f = floor), 
-                                          round_any(max_x, 5, f = ceiling), by = 5)), 
-                     color = 'white') +
-          geom_segment(aes(x = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
-                           y = rep(70.9 / 3 - 0.5, length(seq(round_any(min_x, 5, f = floor), 
-                                                                 round_any(max_x, 5, f = ceiling), by = 1 )) ), 
-                           xend = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
-                           yend = rep(70.9 / 3 + 0.5, length(seq(round_any(min_x, 5, f = floor), 
-                                                                 round_any(max_x, 5, f = ceiling), by = 1 ))) ), 
-                       color = 'white') +
-          geom_segment(aes(x = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
-                           y = rep(70.8 / 3 + 18.5 / 3 - 0.5, length(seq(round_any(min_x, 5, f = floor), 
-                                                                 round_any(max_x, 5, f = ceiling), by = 1 )) ), 
-                           xend = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
-                           yend = rep(70.8 / 3 + 18.5 / 3 + 0.5, length(seq(round_any(min_x, 5, f = floor), 
-                                                                 round_any(max_x, 5, f = ceiling), by = 1 ))) ), 
-                       color = 'white') + ylab("") + xlab("") + 
-        geom_hline(yintercept = 0, color = 'white')  + geom_hline(yintercept = 54, color = 'white') + geom_vline(xintercept = 0, color = 'white') + 
-        geom_vline(xintercept = 120, color = 'white')  + 
-        geom_point(data = play_df_frame, aes(x = x, y = y, size = type, color = type, shape = type))  +
-        scale_shape_manual(values = c(20, 18, 18)) +
-        scale_size_manual(values = c(2, 5, 5)) +
-        scale_color_manual(values = c("white", "cornflowerblue", "lightseagreen")) +
-        labs(title = "Tackle Classifier Example", x = "", y = "", caption = describe) + xlim(0, 120) + ylim(0, 54) + theme_minimal() 
-    print(main)
-    print(paste0("Frame ", i))
-    ani.pause()}
-    },movie.name="facet_zoom_2.gif",ani.width = 600, ani.height = 600)
-}
-
 plot_combine_play_contribution <- function(game_id, play_id) {
     pred_df <- read.csv(paste0("/Users/nickbachelder/Desktop/Personal Code/Kaggle/Tackles/", game_id, "_", play_id, ".csv")) %>% dplyr::select(-X) %>%
       mutate(x = as.numeric(x), y = as.numeric(y))
@@ -152,12 +101,14 @@ plot_combine_play_contribution <- function(game_id, play_id) {
       plot_list <- list()
       all_omit <- (pred_df %>% filter(omit!=0))$omit %>% unique()
       iter <- 1
+      max_z = max((pred_df %>% filter(frameId == i, omit != 0))$prob)
+      min_z = max((pred_df %>% filter(frameId == i, omit != 0))$prob)
       for (id in all_omit) {
         play_df_frame <- play_df %>% filter(frameId == i) %>% filter(nflId == id | type == 'ball')
         name <- (play_df_frame %>% filter(nflId == id))$displayName[1]
         pred_df_frame <- pred_df %>% filter(frameId == i, omit == id) 
         p <- ggplot() + geom_tile(data = pred_df_frame, aes(x = x, y = y, fill = prob), width = 10, height = 10)  +
-          scale_fill_gradient2(midpoint = 0, low = "blue", mid = "grey", high = "brown1", limits = c(-.1, .1)) +
+          scale_fill_gradient2(midpoint = 0, low = "blue", mid = "grey", high = "brown1", limits = c(min_z, max_z)) +
               geom_vline(aes(xintercept = seq(round_any(min_x, 5, f = floor), 
                                             round_any(max_x, 5, f = ceiling), by = 5)), 
                        color = 'white') +
@@ -184,7 +135,7 @@ plot_combine_play_contribution <- function(game_id, play_id) {
         plot_list[[iter]] <- p
         iter = iter+1
       }
-      arranged_plots <- ggarrange(plotlist = plot_list, ncol = 3, nrow = 5)
+      arranged_plots <- ggarrange(plotlist = plot_list, ncol = 3, nrow = 4)
       arranged_plots2 <-ggarrange(plotlist = list(main, arranged_plots), ncol = 1, nrow = 2)
       print(arranged_plots2)
       print(paste0("Frame ", i))
@@ -276,15 +227,19 @@ plot_features <- function(game_id, play_id) {
 ```
 
 ```{r}
-game_id=2022103012
-play_id=1919
+game_id=2022091105
+play_id=2587
 
 plot_combine_play_contribution(game_id, play_id)
 plot_play(game_id, play_id)
 plot_features(game_id, play_id)
+
+tracking
 ```
 
-
+```{r}
+plays %>% filter(playResult>60)
+```
 
 
 
@@ -347,48 +302,37 @@ $$f(\text{End of Play}_i = \begin{bmatrix} x \\ y \end{bmatrix}) = \sum_{k=1}^{K
 
 
 
-```{r}
-contribution_df %>% filter(rank(estimated) < 10)
-```
 
-
-
-```{r}
-tracking %>% filter(gameId == game_id, playId == play_id)
-```
-
-
-
-```{r}
-contribution_df %>% filter(game_id == game_id, play_id == play_id)
-```
+### Contribution analysis
 
 
 ```{r}
 contribution_df <- read.csv(here::here("data/contribution_df.csv")) 
 
-ggplot(data=contribution_df) + geom_density(aes(x=estimated))
+ggplot(data=contribution_df) + geom_density(aes(x=estimated_contribution))
 
-cumulative_contribution_df <-  contribution_df %>% arrange(play_id) %>% group_by(nflId, displayName, position) %>% 
-  mutate(play_number = rank(play_id), cum_contribution = cumsum(estimated), 
-         avg_contribution= mean(cum_contribution),
-         final_cum_contribution = cum_contribution[play_number == max(play_number)],
-         total_play_num = max(play_number)) %>% ungroup()
+cumulative_contribution_df <- contribution_df %>% arrange(play_id) %>%
+  group_by(nflId, displayName, position) %>% 
+  mutate(overall_frame_id = row_number(), 
+         cum_contribution = cumsum(estimated_contribution), 
+         avg_contribution= mean(estimated_contribution),
+         final_cum_contribution = cum_contribution[overall_frame_id == max(overall_frame_id)],
+         total_frame_num = max(overall_frame_id)) %>% ungroup()
 
 eys_rank <- cumulative_contribution_df %>% dplyr::select(nflId, displayName, position, final_cum_contribution) %>% distinct() %>%
-  mutate(rank_cum_contribution = rank(-final_cum_contribution)) %>% dplyr::select(-final_cum_contribution) %>%
+  mutate(rank_cum_contribution = rank(-final_cum_contribution)) %>% 
   arrange(rank_cum_contribution) %>% 
   mutate(best_or_worst = ifelse(rank_cum_contribution < 3 | rank_cum_contribution > max(rank_cum_contribution)-3, 1, 0))
 
-final_eys <- cumulative_contribution_df %>% dplyr::select(nflId, displayName, position, play_number, final_cum_contribution) %>% 
-  group_by(nflId, displayName, position) %>% filter(play_number == max(play_number)) %>% ungroup() %>% 
+final_eys <- cumulative_contribution_df %>% dplyr::select(nflId, displayName, position, overall_frame_id, final_cum_contribution) %>% 
+  group_by(nflId, displayName, position) %>% filter(overall_frame_id == max(overall_frame_id)) %>% ungroup() %>% 
   left_join(eys_rank %>% dplyr::select(nflId, displayName, best_or_worst) %>% distinct(), on = c("nflId", "displayName")) %>%
   filter(best_or_worst == 1)
 
 cumulative_contribution_df %>% left_join(eys_rank, on = c('nflId', 'displayName', 'position', 'final_cum_contribution'))  %>%
   ggplot() + 
-  geom_line(aes(x = play_number, y = cum_contribution, group = nflId, alpha = best_or_worst)) +
-  geom_text_repel(data = final_eys, aes(x = play_number, y = final_cum_contribution, label=displayName), color = "blue") +
+  geom_line(aes(x = overall_frame_id, y = cum_contribution, group = nflId, alpha = best_or_worst)) +
+  geom_text_repel(data = final_eys, aes(x = overall_frame_id, y = final_cum_contribution, label=displayName), color = "blue") +
   theme_classic() + ggtitle("Cumulative Expected Yards Saved") + xlab("Play Number") + ylab("Cumulative Expected Yards Saved (EYS)")
 ```
 
@@ -397,16 +341,21 @@ cumulative_contribution_df %>% dplyr::select(nflId, displayName, position, final
   ggplot(aes(x = position, y = final_cum_contribution)) + geom_violin() + theme_classic()
   
 
-general_table <- cumulative_contribution_df  %>% dplyr::select(nflId, displayName, position, final_cum_contribution, avg_contribution, total_play_num) %>% distinct() %>%
+general_table <- cumulative_contribution_df  %>% 
+  dplyr::select(nflId, displayName, position, final_cum_contribution, avg_contribution, total_frame_num) %>% distinct() %>%
   mutate(rank_cum_contribution = rank(-final_cum_contribution), rank_avg_contribution = rank(-avg_contribution)) %>%
   arrange(rank_cum_contribution) 
 
 general_table %>% filter(rank_cum_contribution < 10)  %>% gt() %>% gt_theme_538()
 general_table %>% filter(rank_avg_contribution < 10)  %>% gt() %>% gt_theme_538()
 
-general_table %>% ggplot() + geom_point(aes(x = total_play_num, y = avg_contribution))
+general_table %>% ggplot() + geom_point(aes(x = total_frame_num, y = avg_contribution))
 
-cor(general_table$total_play_num, general_table$avg_contribution)
+cor(general_table$total_frame_num, general_table$avg_contribution)
+```
+
+```{r}
+general_table %>% filter(displayName == "Chris Jones")
 ```
 
 
@@ -422,31 +371,36 @@ general_table %>%
 
 
 ```{r}
-frames <- seq(1,30)
-all_contained <- c()
-for (trial in seq(1, 1000)) {
-  values <- c()
-  for (i in seq(1, 100)) {
-    values[i] <- sample(frames, 1)
-  all_contained[trial] = length(unique(values))/30
-  }
-}
-mean(all_contained)
-```
-
-```{r}
-tracking %>% filter(frameId >20)
-```
-
-
-```{r}
 loss_df <- read.csv("/Users/nickbachelder/Desktop/Personal Code/Kaggle/Tackles/test_loss_track.csv") 
 
-ggplot() + geom_line(data = loss_df, aes(x = frames_from_eop, y = test_loss, group = bag), alpha = 0.1) +
-  geom_line(data = loss_df %>% filter(frames_from_eop, bag == "overall"), 
-                         aes(group = frames_from_eop, y = test_loss)) + theme_classic() +
-  xlab("Frames from End of Play") + ylab("Negative Log Liklihood Loss")
+loss_df %>% filter(frames_from_eop == 3)
   
 ```
 
 
+
+
+### SOI analysis 
+```{r}
+contribution_df %>% ggplot(aes(x = estimated_contribution, y = estimated_soi)) + geom_point()
+```
+
+
+
+```{r}
+soi_df <- contribution_df %>%
+  group_by(nflId, displayName, position, game_id, play_id) %>% 
+  dplyr::summarise(max_soi= max(estimated_soi)) %>% ungroup() %>%
+  left_join(
+    tackles %>% dplyr::select(nflId, gameId, playId, tackle, assist, forcedFumble) %>% dplyr::rename(game_id = gameId, play_id = playId) %>%
+     group_by(nflId, game_id, play_id) %>% dplyr::summarise(total_tackle_involvement = sum(tackle, assist, forcedFumble)) %>% ungroup(),
+    on = c("nflId", "game_id", "play_id")) %>% mutate(total_tackle_involvement=ifelse(is.na(total_tackle_involvement), 0, total_tackle_involvement))
+
+soi_df %>%ggplot+geom_point(aes(x = max_soi, y = total_tackle_involvement))
+```
+
+
+
+```{r}
+contribution_df %>% filter(estimated_soi == min(estimated_soi))
+```

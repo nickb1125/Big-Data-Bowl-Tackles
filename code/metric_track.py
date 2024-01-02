@@ -12,7 +12,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 import random
-from objects import play, TackleAttemptDataset, plot_predictions, TackleNetEnsemble
+from objects import play, TackleNetEnsemble
 import pickle
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
@@ -50,7 +50,10 @@ for index, play_row in tqdm(week_9_plays.iterrows(), total=len(week_9_plays), de
         omit_predict_object = play_object.predict_tackle_distribution(model=model, without_player_id = id)
         metric_object = play_object.get_expected_contribution(model, original_predict_object=original_all_pred, w_omission_all_pred=omit_predict_object)
         lower_contriution, exp_contriution, upper_contriution = metric_object['contribution']  # for all frames
+        print(f"{id} Expected contribution frame 1: {round(exp_contriution[0], 2)} 95% CI: [{round(lower_contriution[0], 2)}, {round(upper_contriution[0], 2)}]")
         lower_soi, exp_soi, upper_soi = metric_object['soi'] # for all frames
+        print(f"{id} Expected SOI frame 1: {round(exp_soi[0], 2)} 95% CI: [{round(lower_soi[0], 2)}, {round(upper_soi[0], 2)}]")
+
 
         all_player_dict[id]['estimated_contribution'].extend(exp_contriution)
         all_player_dict[id]['lower_contribution'].extend(lower_contriution)
@@ -60,8 +63,8 @@ for index, play_row in tqdm(week_9_plays.iterrows(), total=len(week_9_plays), de
         all_player_dict[id]['lower_soi'].extend(lower_soi)
         all_player_dict[id]['upper_soi'].extend(upper_soi)
         
-        all_player_dict[id]['play_id'].append(np.repeat(play_row.playId, len(exp_contriution)))
-        all_player_dict[id]['game_id'].append(np.repeat(play_row.gameId, len(exp_contriution)))
+        all_player_dict[id]['play_id'].extend(np.repeat(play_row.playId, len(exp_contriution)))
+        all_player_dict[id]['game_id'].extend(np.repeat(play_row.gameId, len(exp_contriution)))
 
 with open(f"data/contribution_dict.pkl", f'wb') as outp:  # Overwrites any existing file.
     pickle.dump(all_player_dict, outp, pickle.HIGHEST_PROTOCOL)

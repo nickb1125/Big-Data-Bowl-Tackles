@@ -92,22 +92,22 @@ class play:
             def_df = stratified_dfs["Defense"].reset_index(drop = 1)
             ball_df = stratified_dfs["Carrier"].reset_index(drop = 1)
 
-            distance_offense_from_ballcarrier = np.sqrt((off_df['x'] - ball_df['x'].values[0])**2 + (off_df['y'] - ball_df['y'].values[0])**2).tolist()
-            distance_defense_from_ballcarrier = np.sqrt((def_df['x'] - ball_df['x'].values[0])**2 + (def_df['y'] - ball_df['y'].values[0])**2).tolist()
+            distance_offense_from_ballcarrier = np.sqrt((off_df['x'] - ball_df['x'].values[0])**2 + (off_df['y'] - ball_df['y'].values[0])**2)
+            distance_defense_from_ballcarrier = np.sqrt((def_df['x'] - ball_df['x'].values[0])**2 + (def_df['y'] - ball_df['y'].values[0])**2)
 
             off_movement_features = get_player_movement_features(off_df, N)
             off_acc_mat = off_movement_features['field_weighted_acc']
             off_vel_mat = off_movement_features['field_weighted_velocity']
-            #off_distance_mat = off_movement_features['distance']
-            #off_acc_mat_weight = (1/np.array(distance_offense_from_ballcarrier+0.001)[:, np.newaxis, np.newaxis] * off_acc_mat)
-            #off_vel_mat_weight = (1/np.array(distance_offense_from_ballcarrier+0.001)[:, np.newaxis, np.newaxis] * off_vel_mat)
+            # off_distance_mat = off_movement_features['distance']
+            off_acc_mat = (1/np.array(distance_offense_from_ballcarrier+0.001)[:, np.newaxis, np.newaxis] * off_acc_mat)
+            off_vel_mat = (1/np.array(distance_offense_from_ballcarrier+0.001)[:, np.newaxis, np.newaxis] * off_vel_mat)
 
             def_movement_features = get_player_movement_features(def_df, N)
             def_acc_mat = def_movement_features['field_weighted_acc']
             def_vel_mat = def_movement_features['field_weighted_velocity']
             #def_distance_mat = off_movement_features['distance']
-            #def_acc_mat_weight = (1/np.array(distance_defense_from_ballcarrier+0.001)[:, np.newaxis, np.newaxis] * def_acc_mat)
-            #def_vel_mat_weight = (1/np.array(distance_defense_from_ballcarrier+0.001)[:, np.newaxis, np.newaxis] * def_vel_mat)
+            def_acc_mat = (1/np.array(distance_defense_from_ballcarrier+0.001)[:, np.newaxis, np.newaxis] * def_acc_mat)
+            def_vel_mat = (1/np.array(distance_defense_from_ballcarrier+0.001)[:, np.newaxis, np.newaxis] * def_vel_mat)
 
             ball_movement_features = get_player_movement_features(ball_df, N)
             ball_acc_mat = ball_movement_features['field_weighted_acc']
@@ -144,18 +144,18 @@ class play:
             def_acc_mat = np.delete(def_acc_mat, player_index, axis = 0)
         
         # Filter to 12 closest
-        closest = np.argsort(distance_defense_from_ballcarrier)[:8]
-        closest_off = np.argsort(distance_offense_from_ballcarrier)[:8]
+        # closest = np.argsort(distance_defense_from_ballcarrier)[:7]
+        # closest_off = np.argsort(distance_offense_from_ballcarrier)[:7]
 
         ret = np.stack([
                 np.sum(off_density, axis=0), 
                 np.sum(def_density, axis=0),
                 np.sum(ball_vel_mat, axis = 0), 
                 np.sum(ball_acc_mat, axis = 0),
-                np.sum(off_vel_mat[closest_off], axis = 0), 
-                np.sum(off_acc_mat[closest_off], axis = 0), 
-                np.sum(def_vel_mat[closest], axis = 0),
-                np.sum(def_acc_mat[closest], axis = 0),
+                np.sum(off_vel_mat, axis = 0), 
+                np.sum(off_acc_mat, axis = 0), 
+                np.sum(def_vel_mat, axis = 0),
+                np.sum(def_acc_mat, axis = 0),
                 ])
         if not plot:
             return ret
@@ -220,9 +220,7 @@ class play:
         # Get contribution:
         expected_omit = self.get_expected_eop(w_omission_all_pred, return_all_model_results=True)
         expected_orig = self.get_expected_eop(original_predict_object, return_all_model_results=True)
-        contributions = expected_orig-expected_omit # num_mod, num_frame
-        if self.playDirection == 'left':
-            contributions = -contributions
+        contributions = expected_omit-expected_orig # num_mod, num_frame
         #print(f"Expected Contributions: {np.mean(contributions, axis = 0)}")
 
         # -----------------------------------------
@@ -466,7 +464,7 @@ class TackleNetEnsemble:
 
         end_time = time.time()
         execution_time = end_time - start_time
-        print(f"Prediction took {execution_time} seconds")
+        # print(f"Prediction took {execution_time} seconds")
 
         return {'overall_pred': overall_pred, 'lower': lower, 'upper': upper,
                 'all_pred': preds, 'mixture_return': mixture_ensemble_object}

@@ -24,7 +24,7 @@ records = []
 
 # Define Loss
 # criterion = nn.BCELoss()
-plot = True
+plot = False
 train = True
 cross_validate = False
 validate_each_epoch_cv = True

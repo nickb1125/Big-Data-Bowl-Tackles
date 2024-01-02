@@ -12,7 +12,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 import random
-from objects import play, TackleAttemptDataset, plot_predictions
+from objects import play, TackleAttemptDataset
 import pickle
 
 print("Loading base data")
