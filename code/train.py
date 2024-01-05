@@ -22,8 +22,11 @@ import statistics
 # Make record keeper
 records = []
 
+# Get occurance weights
+with open("data/percentage_occurrences.pkl", 'rb') as f:
+    occurance_dict = pickle.load(f)
+
 # Define Loss
-# criterion = nn.BCELoss()
 plot = False
 train = True
 cross_validate = False
@@ -67,8 +70,8 @@ if train:
                     train_dataloader = DataLoader(train_data, batch_size=512, shuffle=True)
                     val_loader = DataLoader(val_data, batch_size=64)
                     model = BivariateGaussianMixture(nmix=nmix)
-                    optimizer = optim.Adam(model.parameters(), lr=0.001)
-                    num_epochs = 50
+                    optimizer = optim.Adam(model.parameters(), lr=0.0005)
+                    num_epochs = 25
                     losses = []
                     start_over = False
                     j = 0
@@ -76,7 +79,7 @@ if train:
                         j += 1
                         counter = 0
                         train_losses = []
-                        for X_batch, y_batch in train_dataloader:
+                        for X_batch, y_batch, gained in train_dataloader:
                             counter += X_batch.shape[0]
                             optimizer.zero_grad()
                             try:
@@ -85,7 +88,8 @@ if train:
                                 print("Gradient Exploded, trying to train this model again...")
                                 start_over = True
                                 break
-                            loss = criterion(output, y_batch)
+                            weights = [1/math.sqrt(occurance_dict[int(yardage)]) for yardage in gained]
+                            loss = criterion(output, y_batch, class_weights=weights)
                             train_losses.append(loss.detach().item())
                             loss.backward()
                             optimizer.step()
@@ -99,13 +103,14 @@ if train:
                                 i = 0
                                 counter = 0
                                 val_losses = []
-                                for X_batch, y_batch in val_loader:
+                                for X_batch, y_batch, gained in val_loader:
                                     counter += X_batch.shape[0]
                                     outputs = model(X_batch)
                                     if (i == 0) & (j % 5 == 0) & (j != 0) & (plot):
                                         pdf_out = get_mixture_pdf(normal_models=outputs[1], pi_models=outputs[0])
                                         plot_field(pdf_output=pdf_out, true=y_batch)
-                                    val_loss = criterion(outputs, y_batch)
+                                    weights = [1/math.sqrt(occurance_dict[int(yardage)]) for yardage in gained]
+                                    val_loss = criterion(outputs, y_batch, class_weights=weights)
                                     val_losses.append(val_loss.detach().item())
                                     i += 1
                                 val_loss = sum(val_losses)/counter
@@ -118,13 +123,14 @@ if train:
                     with torch.no_grad():  # Disable gradient computation for inference
                         i = 0
                         counter = 0
-                        for X_batch, y_batch in val_loader:
+                        for X_batch, y_batch, gained in val_loader:
                             counter += X_batch.shape[0]
                             outputs = model(X_batch)
                             if (i == 0) & (j != 0) & (plot):
                                 pdf_out = get_mixture_pdf(normal_models=outputs[1], pi_models=outputs[0])
                                 plot_field(pdf_output=pdf_out, true=y_batch)
-                            val_loss = criterion(outputs, y_batch)
+                            weights = [1/math.sqrt(occurance_dict[int(yardage)]) for yardage in gained]
+                            val_loss = criterion(outputs, y_batch, weights)
                             val_losses.append(val_loss.detach().item())
                             i += 1
                     val_loss = sum(val_losses)/counter
@@ -146,8 +152,7 @@ if train:
     bag = 0
     while bag < 10:
         with open(f'data/tackle_image_bag_{bag}.pkl', 'rb') as f:
-            tackle_dataset = pickle.load(f)
-        
+            tackle_dataset = pickle.load(f)        
         print("**************---------------------*****************")
         print(f"Training Bag {bag} with N = {len(tackle_dataset)} observations.")
         print("**************---------------------*****************")
@@ -159,10 +164,10 @@ if train:
         model = BivariateGaussianMixture(nmix=nmix)
 
         # Define the optimizer (e.g., Stochastic Gradient Descent)
-        optimizer = optim.Adam(model.parameters(), lr=0.001)
+        optimizer = optim.Adam(model.parameters(), lr=0.0005)
 
         # Training loop
-        num_epochs = 15
+        num_epochs = 25
         
         losses = []
         start_over = False
@@ -171,7 +176,7 @@ if train:
             j = 0
             train_losses = []
             counter = 0
-            for X_batch, y_batch in train_dataloader:
+            for X_batch, y_batch, gained in train_dataloader:
                 counter += X_batch.shape[0]
                 optimizer.zero_grad()
                 try:
@@ -185,7 +190,8 @@ if train:
                     plot_field(pdf_output=pdf_out, true=y_batch.detach().numpy())
 
                 j+=1
-                loss = criterion(output, y_batch)
+                weights = [1/math.sqrt(occurance_dict[int(yardage)]) for yardage in gained]
+                loss = criterion(output, y_batch, weights)
                 train_losses.append(loss.detach().item())
                 # print(loss)
                 loss.backward()
@@ -209,14 +215,15 @@ if train:
                 counter = 0
                 i = 0
                 with torch.no_grad():  # Disable gradient computation for inference
-                    for X_batch, y_batch in test_dataloader:
+                    for X_batch, y_batch, gained in test_dataloader:
                         counter += X_batch.shape[0]
                         outputs = model(X_batch)
                         if (i == 0) & (plot):
                             print("Plotting for test set")
                             pdf_out = get_mixture_pdf(normal_models=outputs[1], pi_models=outputs[0])
                             plot_field(pdf_output=pdf_out, true=y_batch)
-                        test_loss = criterion(outputs, y_batch)
+                        weights = [1/math.sqrt(occurance_dict[int(yardage)]) for yardage in gained]
+                        test_loss = criterion(outputs, y_batch, weights)
                         test_losses.append(test_loss.detach().item())
                 test_loss = sum(test_losses)/counter
                 records.append(pd.DataFrame({"bag" : [bag], "frames_from_eop" : [from_end_frame], "test_loss" : [test_loss]}))
@@ -239,12 +246,13 @@ for from_end_frame in from_frame_end_values:
     counter = 0
     with torch.no_grad():  # Disable gradient computation for inference
         counter = 0
-        for X_batch, y_batch in test_dataloader:
+        for X_batch, y_batch, gained in test_dataloader:
             counter += X_batch.shape[0]
             pred = ensemble_model.predict_pdf(X_batch)
             output_model = pred['mixture_return']
             outputs = pred['overall_pred']
-            test_loss = criterion(output_model, y_batch)
+            weights = [1/math.sqrt(occurance_dict[int(yardage)]) for yardage in gained]
+            test_loss = criterion(output_model, y_batch, weights)
             test_losses.append(test_loss.detach().item())
             if (i == 0) & (plot):
                 plot_field(outputs, y_batch)
@@ -257,3 +265,5 @@ for from_end_frame in from_frame_end_values:
 
 records = pd.concat(records, axis = 0)
 records.to_csv("test_loss_track.csv")
+
+

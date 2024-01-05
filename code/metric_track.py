@@ -27,18 +27,19 @@ tracking = pd.concat([pd.read_csv(f"data/nfl-big-data-bowl-2024/tracking_a_week_
 plays = pd.read_csv("data/nfl-big-data-bowl-2024/plays.csv")
 plays = tracking[['gameId', 'playId']].drop_duplicates().merge(plays, how = 'left', on = ['gameId', 'playId'])
 # Define pretrained model
-model = TackleNetEnsemble(num_models = 10, N = 3, nmix=5)
+model = TackleNetEnsemble(num_models = 3, N = 3, nmix=5)
 
 # get play metrics
-week_9_games = tracking.query("week == 9").gameId.unique()
-week_9_plays = plays.query("(gameId in @week_9_games)")
+all_games = tracking.gameId.unique() # .query("week == 8")
+all_plays = plays.query("(gameId in @all_games)")
 
 print("Getting metrics")
 print("-----------------")
 
 all_player_dict = {id : {'game_id' : [], 'play_id' : [], 'estimated_contribution' : [], 'lower_contribution' : [], 'upper_contribution' : [],
-                         'estimated_soi' : [], 'lower_soi' : [], 'upper_soi' : []} for id in tracking.nflId.unique()}
-for index, play_row in tqdm(week_9_plays.iterrows(), total=len(week_9_plays), desc="Processing Plays"):
+                         'estimated_soi' : [], 'lower_soi' : [], 'upper_soi' : [],
+                         'estimated_doi' : [], 'lower_doi' : [], 'upper_doi' : []} for id in tracking.nflId.unique()}
+for index, play_row in tqdm(all_plays.iterrows(), total=len(all_plays), desc="Processing Plays"):
     play_object = play(play_row.gameId, play_row.playId, tracking)
     try:
         def_df = play_object.refine_tracking(frame_id = play_object.min_frame)["Defense"]

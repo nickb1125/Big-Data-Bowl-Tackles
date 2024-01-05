@@ -43,7 +43,7 @@ if load_test:
         for frame_id in range(play_object.min_frame, play_object.num_frames+1):
             frames_from_end = play_object.num_frames-frame_id
             if not frames_from_end in frame_dict.keys():
-                frame_dict[frames_from_end] = {"images" : [], "labels" : [], "play_ids" : [], "frame_ids" : []}
+                frame_dict[frames_from_end] = {"images" : [], "labels" : [], "gained" :[], "play_ids" : [], "frame_ids" : []}
             frame_dict[frames_from_end]['play_ids'].append(play_row.playId)
             frame_dict[frames_from_end]['frame_ids'].append(frame_id)
             try:
@@ -56,6 +56,7 @@ if load_test:
                 # print("Below has infinity feature output and is being omitted, check if desired...")
                 # print(row)
                 continue
+            frame_dict[frames_from_end]['gained'].append(play_object.yards_gained)
             frame_dict[frames_from_end]['images'].append(image)
             # frame_dict[frames_from_end]['labels'].append(play_object.get_end_of_play_matrix(N = N))
             frame_dict[frames_from_end]['labels'].append(play_object.eop[['eop_x', 'eop_y']].iloc[0].tolist())
@@ -67,6 +68,7 @@ if load_test:
     for frame_from_end in frame_dict.keys():
         tackle_dataset = TackleAttemptDataset(images = frame_dict[frame_from_end]['images'], 
                                               labels = frame_dict[frame_from_end]['labels'], 
+                                              gained = frame_dict[frames_from_end]['gained'],
                                               play_ids = frame_dict[frame_from_end]['play_ids'], 
                                               frame_ids = frame_dict[frame_from_end]['frame_ids'])
         with open(f"data/test_tackle_images_{frame_from_end}_from_end.pkl", f'wb') as outp:  # Overwrites any existing file.
@@ -85,10 +87,11 @@ for bag in range(10):
     # Choose random frame from each play
     images = []
     labels = []
+    gained = []
     for row in tqdm(range(train_val_plays.shape[0])):
         play_row = train_val_plays.iloc[row,]
         play_object = play(play_row.gameId, play_row.playId, tracking)
-        frame_id = random.randint(play_object.min_frame, play_object.num_frames)
+        frame_id = random.randint(play_object.min_frame, play_object.min_frame+10)
         play_ids.append(play_row.playId)
         frame_ids.append(frame_id)
         try:
@@ -104,10 +107,33 @@ for bag in range(10):
         images.append(image)
         # labels.append(play_object.get_end_of_play_matrix(N = N))
         labels.append(play_object.eop[['eop_x', 'eop_y']].iloc[0].tolist())
-    tackle_dataset = TackleAttemptDataset(images = images, labels = labels, play_ids = play_ids, frame_ids = frame_ids)
+        gained.append(play_object.yards_gained)
+    tackle_dataset = TackleAttemptDataset(images = images, labels = labels, gained = gained, play_ids = play_ids, frame_ids = frame_ids)
 
     with open(f"data/tackle_image_bag_{bag}.pkl", f'wb') as outp:  # Overwrites any existing file.
         pickle.dump(tackle_dataset, outp, pickle.HIGHEST_PROTOCOL)
+
+# get occurance percentages for weights
+
+yards_gained = []
+for _, row in tqdm(tracking[['gameId', 'playId']].drop_duplicates().iterrows()):
+    play_object = play(game_id=row.gameId, play_id=row.playId, tracking=tracking)
+    yards_gained.append(int(play_object.yards_gained))
+
+yards_gained.sort()
+total_elements = len(yards_gained)
+occurrences = {}
+
+for num in yards_gained:
+    occurrences[num] = occurrences.get(num, 0) + 1
+
+percentage_occurrences = {num: (count / total_elements) for num, count in occurrences.items()}
+
+for num, percentage in percentage_occurrences.items():
+    print(f"{num}: {percentage:.2f}%")
+
+with open(f"data/percentage_occurrences.pkl", f'wb') as outp:  # Overwrites any existing file.
+    pickle.dump(percentage_occurrences, outp, pickle.HIGHEST_PROTOCOL)
 
 
 

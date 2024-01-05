@@ -4,7 +4,7 @@ import numpy as np
 players = pd.read_csv("data/nfl-big-data-bowl-2024/players.csv")
 players = players[['nflId', 'weight', 'position']]
 plays = pd.read_csv("data/nfl-big-data-bowl-2024/plays.csv")
-plays = plays[['gameId', 'playId', 'ballCarrierId']]
+plays = plays[['gameId', 'playId', 'ballCarrierId', 'passLength']]
 
 
 for week in range(1, 10):
@@ -36,6 +36,8 @@ for week in range(1, 10):
 
     current_positions = final_tracking.merge(players, on = "nflId", how = "left")
     current_positions = current_positions.merge(plays, on = ['gameId', 'playId'], how = "left")
+    current_positions = current_positions.loc[current_positions['passLength'].isna() | (current_positions['passLength'] <= 0), :]
+
 
     current_positions['type'] = current_positions['position'].apply(
         lambda x: "Offense" if x in ["QB", "TE", "WR", "G", "OLB", "RB", "C", "FB"] else "Defense")

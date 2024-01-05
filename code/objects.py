@@ -58,6 +58,7 @@ def calculate_expected_from_mat(marginalized_probs_mat, for_metric = False):
         return {"estimate": -estimate, "lower": -upper, "upper": -lower}
     return {"estimate": estimate, "lower": lower, "upper": upper}
 
+
 class play:
     def __init__(self, game_id, play_id, tracking):
         self.game_id = game_id
@@ -70,6 +71,17 @@ class play:
         self.eop = self.get_end_of_play_location()
         self.yardlines = np.array(self.tracking_df.query("displayName == 'football'").sort_values(by='frameId').x)
         self.features_base_cache = dict()
+        yard_start=self.tracking_df.query("nflId.isna() & frameId == @self.min_frame").x.values[0]
+        yard_end=self.tracking_df.query("nflId.isna() & frameId == @self.num_frames").x.values[0]
+        self.yards_gained=yard_end-yard_start
+
+    def get_closest_three_def_from_eop(self):
+        def_df = self.refine_tracking(frame_id = self.num_frames)["Defense"]
+        xs, ys = def_df['x'], def_df['y']
+        distance_defense_from_ballcarrier = np.sqrt((def_df['x'] - self.eop['eop_x'].values[0])**2 + (def_df['y'] - self.eop['eop_y'].values[0])**2)
+        closest_index = np.argsort(distance_defense_from_ballcarrier)[:3]
+        closest_three = def_df.nflId.values[closest_index]
+        return closest_three
 
     def get_end_of_play_location(self):
         end_of_play_carrier = self.tracking_df.query("nflId == @self.ball_carry_id & frameId == @self.num_frames")
@@ -231,16 +243,16 @@ class play:
         contribution_matrix[contribution_matrix < 0] = 0 # filter to positive influence (since influence should sum so 0)
         flattened_array = contribution_matrix.reshape((model.num_models, self.num_frames-self.min_frame+1, -1))
 
-        # Step 2: Sort the flattened array in descending order
         sorted_array = np.sort(flattened_array, axis=-1)[:, :, ::-1]
 
-        # Step 3: Calculate the cumulative sum
         cumulative_sum = np.cumsum(sorted_array, axis=-1)
+        doi = np.sum(flattened_array, axis=-1)
 
-        # Step 4: Find the index where cumulative sum exceeds 90% of the total sum
-        num_grid_points_90_percent = np.argmax(cumulative_sum >= 0.9 * np.sum(flattened_array, axis=-1)[:,:,np.newaxis], axis=-1)  + 1  # Add 1 because indexing starts from 0
+        num_grid_points_90_percent = np.argmax(cumulative_sum >= 0.9 * doi[:,:,np.newaxis], axis=-1)  + 1  # Add 1 because indexing starts from 0
         #print(f"Expected SOIs: {np.mean(num_grid_points_90_percent, axis = 0)}")
         #print("------------------------")
+        num_grid_points_90_percent = num_grid_points_90_percent / (50*120)
+
         return {"contribution" : (np.percentile(contributions, axis = 0, q=2.5), np.mean(contributions, axis = 0), np.percentile(contributions, axis = 0, q = 97.5)),
                 "soi" : (np.percentile(num_grid_points_90_percent, axis = 0, q=2.5), np.mean(num_grid_points_90_percent, axis = 0), np.percentile(num_grid_points_90_percent, axis = 0, q = 97.5))}
     
@@ -305,11 +317,12 @@ class play:
 
 
 class TackleAttemptDataset:
-    def __init__(self, images, labels, play_ids, frame_ids):
+    def __init__(self, images, labels, gained, play_ids, frame_ids):
         self.playIds = play_ids
         self.frameIds = frame_ids
         self.images = images
         self.labels = labels
+        self.gained = gained
         self.num_samples = len(labels)
     
     def __len__(self):
@@ -318,9 +331,10 @@ class TackleAttemptDataset:
     def __getitem__(self, idx):
         image = torch.FloatTensor(self.images[idx])
         label = torch.FloatTensor(self.labels[idx])
-        return image, label
+        gained = self.gained[idx]
+        return image, label, gained
     
-def get_player_movement_features(player_df, N):
+def get_player_movement_features(player_df, N, plot = False):
     x_mat = np.tile(np.arange(0, 120, N)+(N/2), (math.ceil(54/N), 1))
     y_mat = np.transpose(np.tile(np.arange(0, 54, N)+(N/2), (math.ceil(120/N), 1)))
     distance_mat = np.zeros((player_df.shape[0], x_mat.shape[0], x_mat.shape[1]))
@@ -331,6 +345,7 @@ def get_player_movement_features(player_df, N):
         x_dist = x_mat - row.x
         y_dist = y_mat - row.y
         distance = np.sqrt((x_dist)**2 + (y_dist)**2)
+        distance = np.where(distance < 1, 1, distance)
         velocity_toward_grid = (row.Sx*x_dist + row.Sy*y_dist) / (distance+0.0001)
         velocity_toward_grid[velocity_toward_grid < 0] = 0
         acc_toward_grid = (row.Ax*x_dist + row.Ay*y_dist) / (distance+0.0001)
@@ -344,7 +359,7 @@ def get_player_movement_features(player_df, N):
     return {'distance' : distance_mat, 'field_weighted_velocity': once_weighted_velocity_mat, 
             'field_weighted_acc' : once_weighted_acceleration_mat}
 
-def get_player_field_densities(player_df, N):
+def get_player_field_densities(player_df, N, plot = False):
     density_mat = np.zeros((player_df.shape[0], len(list(range(0, 54, N))), len(list(range(0, 120, N)))))
     for index, row in player_df.iterrows():
         x_rounded = math.floor(row.x / N)
@@ -358,7 +373,6 @@ def get_player_field_densities(player_df, N):
             print(x_rounded)
             raise ValueError
     return density_mat
-    
     
 def array_to_field_dataframe(input_array, N, for_features=False):
     pred_list = []
@@ -469,15 +483,21 @@ class TackleNetEnsemble:
         return {'overall_pred': overall_pred, 'lower': lower, 'upper': upper,
                 'all_pred': preds, 'mixture_return': mixture_ensemble_object}
     
-
+    
 class GaussianMixtureLoss(nn.Module):
     def __init__(self):
         super(GaussianMixtureLoss, self).__init__()
 
-    def forward(self, output, y):
+    def forward(self, output, y, class_weights=None):
         pi_model, normal_model = output[0], output[1]
         loglik = normal_model.log_prob(y.unsqueeze(1).expand_as(normal_model.loc))
         loss = -torch.logsumexp(torch.log(pi_model.probs) + loglik, dim=1)
+
+        # Apply class weights if provided
+        if class_weights is not None:
+            class_weights_tensor = torch.tensor(class_weights, dtype=torch.float32, device=loss.device)
+            loss = loss * class_weights_tensor
+
         return loss.sum()
 
                 
@@ -490,7 +510,7 @@ class BivariateGaussianMixture(nn.Module):
         self.pool1 = nn.MaxPool2d(kernel_size = 3, stride=1) 
         self.pool2 = nn.MaxPool2d(kernel_size = 3, stride=1)  
         self.pool3 = nn.MaxPool2d(kernel_size = 3, stride=1)          
-        self.dropout1 = nn.Dropout(0.7)
+        self.dropout1 = nn.Dropout(0.8)
         self.dropout2 = nn.Dropout(0.7)
         self.resnet = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
         self.mu_net = nn.Sequential(
@@ -516,8 +536,11 @@ class BivariateGaussianMixture(nn.Module):
                         )
         self.elu = nn.ELU()
         init.constant_(self.mu_net[-1].bias, 0) # sigmoid(0) = 0.5
-        init.constant_(self.cov_net[-1].bias, 30) # Start variance slow and let modes expand 
-        # init.constant_(self.pi_net[-1].bias, 1000)
+        init.normal_(self.cov_net[-1].bias, mean = 15, std=2.5)
+        init.constant_(self.cov_net[-1].bias[0::2], 30) # Start variance slow and let modes expand 
+        init.constant_(self.cov_net[-1].bias[1::2], 30)
+        # init.constant_(self.pi_net[-1].bias, 10)
+
 
     def forward(self, x):
         #print(f"OG Shape: {x.shape}")
