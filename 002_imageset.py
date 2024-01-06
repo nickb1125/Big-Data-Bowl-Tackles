@@ -129,9 +129,6 @@ for num in yards_gained:
 
 percentage_occurrences = {num: (count / total_elements) for num, count in occurrences.items()}
 
-for num, percentage in percentage_occurrences.items():
-    print(f"{num}: {percentage:.2f}%")
-
 with open(f"data/percentage_occurrences.pkl", f'wb') as outp:  # Overwrites any existing file.
     pickle.dump(percentage_occurrences, outp, pickle.HIGHEST_PROTOCOL)
 

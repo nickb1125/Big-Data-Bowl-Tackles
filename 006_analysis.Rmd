@@ -1,0 +1,319 @@
+---
+title: "plot.Rmd"
+author: "Nick R. Bachelder"
+date: "2023-11-07"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(here)
+library(dplyr)
+library(gtsummary)
+library(ggplot2)
+library(plyr)
+library(gganimate)
+library(ggforce)
+library(animation)
+library(ggrepel)
+library(tidyr)
+library(ggpubr)
+library(viridis)
+library(gt)
+library(gtExtras)
+```
+
+```{r}
+games <- read.csv(here::here("data/nfl-big-data-bowl-2024/games.csv"))
+players <- read.csv(here::here("data/nfl-big-data-bowl-2024/players.csv")) %>% 
+  rowwise() %>% dplyr::mutate(height = as.numeric(sub("\\-.*", "", height))*12 + as.numeric(sub('.+-(.+)', '\\1', height))) %>% ungroup() %>%
+  dplyr::select(displayName, nflId, height, weight, position)
+plays <- read.csv(here::here("data/nfl-big-data-bowl-2024/plays.csv"))
+tackles <- read.csv(here::here("data/nfl-big-data-bowl-2024/tackles.csv")) %>%
+  left_join(games %>% dplyr::select(gameId, week), on = "gameId")
+tracking <- do.call(rbind, lapply(seq(1, 9), function(week) {read.csv(here::here(paste0("data/nfl-big-data-bowl-2024/tracking_a_week_", week, ".csv")))}))
+contracts <- nflreadr::load_contracts(file_type = getOption("nflreadr.prefer", default = "rds"))
+contracts <- contracts %>%
+  group_by(player) %>%
+  filter(is_active == TRUE, year_signed == max(year_signed)) %>%
+  ungroup() %>%
+  dplyr::select(player, team, apy_cap_pct) %>% dplyr::rename(displayName = player)
+
+plot_features <- function(game_id, play_id) {
+    features <- read.csv(paste0("/Users/nickbachelder/Desktop/Personal Code/Kaggle/Tackles/features_", game_id, "_", play_id, ".csv")) %>% 
+      dplyr::select(-X) %>% dplyr::rename(y = x, x = y) %>% group_by(feature_num) %>%
+      mutate(value = (value - min(value)) / max(value) - min(value)) %>% ungroup()
+    play_df <- tracking %>% filter(gameId == game_id, playId == play_id) %>%
+      dplyr::mutate(type = case_when(position %in% c("QB", "TE",  "WR", "G", "OLB", "RB", "C", "FB") ~ "offense", 
+                               is.na(nflId) ~ "ball",
+                               TRUE ~ "defense"))
+    describe <- (plays %>% filter(gameId == game_id, playId == play_id))$playDescription[1]
+    all_frames <- unique(play_df$frameId)
+    oopt = ani.options(interval = 1/10)
+    saveGIF({for (i in min(all_frames):max(all_frames)) {
+      image_this_frame <- features %>% filter(frameId == i-min(all_frames)) 
+      plot_list <- list()
+      # Iterate over unique feature names and create heat maps
+      iter = 1
+      for (feature_name in unique(image_this_frame$feature_num))  {
+        limits <- c(0, 0.01)
+        if (feature_name == "Carrier Velocity" | feature_name ==  "Carrier Acceleration") {
+          limits <- c(0, 0.005)
+        }
+        feature_data <- subset(image_this_frame, feature_num == feature_name) 
+        if (!(feature_name == "Offense Position" | feature_name == "Defense Position")) {
+          p <- ggplot() + ggtitle(feature_name) +
+            geom_raster(data=feature_data, aes(x = x, y = y, fill = value),interpolate = TRUE) +
+              geom_vline(aes(xintercept = seq(round_any(min_x, 5, f = floor), 
+                                            round_any(max_x, 5, f = ceiling), by = 5)), 
+                       color = 'white') +
+            geom_segment(aes(x = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
+                             y = rep(70.9 / 3 - 0.5, length(seq(round_any(min_x, 5, f = floor), 
+                                                                   round_any(max_x, 5, f = ceiling), by = 1 )) ), 
+                             xend = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
+                             yend = rep(70.9 / 3 + 0.5, length(seq(round_any(min_x, 5, f = floor), 
+                                                                   round_any(max_x, 5, f = ceiling), by = 1 ))) ), 
+                         color = 'white') +
+            geom_segment(aes(x = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
+                             y = rep(70.8 / 3 + 18.5 / 3 - 0.5, length(seq(round_any(min_x, 5, f = floor), 
+                                                                   round_any(max_x, 5, f = ceiling), by = 1 )) ), 
+                             xend = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
+                             yend = rep(70.8 / 3 + 18.5 / 3 + 0.5, length(seq(round_any(min_x, 5, f = floor), 
+                                                                   round_any(max_x, 5, f = ceiling), by = 1 ))) ), 
+                         color = 'white') +xlim(0,120)  + theme_void() + theme(legend.position = "none") + 
+            scale_fill_gradient(low = "darkturquoise", high = "mediumorchid2", limits = limits, oob = scales::squish)
+        }
+        if (feature_name == "Offense Position" | feature_name == "Defense Position") {
+          p <- ggplot() + ggtitle(feature_name) +
+            geom_raster(data = data.frame(expand.grid(x=seq(0, 120), y=seq(0, 54))), aes(x = x, y = y), fill = "darkturquoise") +
+            geom_point(data=feature_data %>% mutate(x = x+1, y=y+1) %>% filter(value !=0), 
+                       aes(x = x, y = y), color = 'mediumorchid2',shape =15, size= 3) +
+              geom_vline(aes(xintercept = seq(round_any(min_x, 5, f = floor), 
+                                            round_any(max_x, 5, f = ceiling), by = 5)), 
+                       color = 'white') +
+            geom_segment(aes(x = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
+                             y = rep(70.9 / 3 - 0.5, length(seq(round_any(min_x, 5, f = floor), 
+                                                                   round_any(max_x, 5, f = ceiling), by = 1 )) ), 
+                             xend = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
+                             yend = rep(70.9 / 3 + 0.5, length(seq(round_any(min_x, 5, f = floor), 
+                                                                   round_any(max_x, 5, f = ceiling), by = 1 ))) ), 
+                         color = 'white') +
+            geom_segment(aes(x = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
+                             y = rep(70.8 / 3 + 18.5 / 3 - 0.5, length(seq(round_any(min_x, 5, f = floor), 
+                                                                   round_any(max_x, 5, f = ceiling), by = 1 )) ), 
+                             xend = seq(round_any(min_x, 5, f = floor), round_any(max_x, 5, f = ceiling), by = 1 ), 
+                             yend = rep(70.8 / 3 + 18.5 / 3 + 0.5, length(seq(round_any(min_x, 5, f = floor), 
+                                                                   round_any(max_x, 5, f = ceiling), by = 1 ))) ), 
+                         color = 'white')+ theme(legend.position = "none") + xlim(0,120) + ylim(0, 54)  + theme_void() 
+        }
+        plot_list[[iter]] <- p
+        iter = iter+1
+      }
+      arranged_plots <- ggarrange(plotlist = plot_list, ncol = 2, nrow = 4)
+      print(arranged_plots)
+      print(paste0("Frame ", i))
+      ani.pause()}
+    },movie.name="main_tackles_features.gif",ani.width = 600, ani.height = 600)
+} 
+```
+
+```{r}
+game_id=2022102700
+play_id=3145
+
+plot_features(game_id, play_id)
+```
+
+
+
+
+
+```{r}
+plays %>% filter(gameId == 2022102000, playId == 1025)
+
+games %>% filter(gameId==2022102000)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Kamara play: https://www.youtube.com/watch?v=7OPcffLuIAo
+# Browns play: https://www.youtube.com/watch?v=TXG2eZAaOBM
+
+
+
+
+### Loss DF
+
+
+
+```{r}
+loss_df <- read.csv("/Users/nickbachelder/Desktop/Personal Code/Kaggle/Tackles/test_loss_track.csv") 
+
+loss_df %>% filter(frames_from_eop == 3)
+  
+```
+
+
+
+```{r}
+contribution_df <- read.csv(here::here("data/contribution_df.csv"))
+
+contribution_df %>% ggplot() + geom_density(aes(x=estimated_contribution)) + xlim(-1, 1)
+contribution_df %>% ggplot() + geom_density(aes(x=estimated_soi)) + xlim(-1, 1)
+
+
+logistic_df <- contribution_df %>% 
+  group_by(game_id, play_id, position, displayName, nflId) %>%
+  dplyr::summarise(avg_contribution = mean(estimated_contribution), avg_contribution_lower = mean(lower_contribution), avg_contribution_upper = mean(upper_contribution),
+                   avg_soi = mean(estimated_soi), avg_soi_upper = mean(upper_soi), avg_soi_lower = mean(lower_soi),
+                   max_contribution = max(estimated_contribution), max_contribution_upper = max(upper_contribution), max_contribution_lower = max(lower_contribution), 
+                   max_soi = max(estimated_soi), max_soi_lower = max(lower_soi), max_soi_upper = max(upper_soi)
+                   ) %>%  ungroup() %>%
+  distinct()  %>%
+  left_join(
+    tackles %>% dplyr::select(gameId, playId, nflId, tackle, assist, forcedFumble) %>% dplyr::rename(game_id = gameId, play_id = playId),
+    on = c("game_id", "play_id", "nflId")) %>%
+  mutate(tackle = ifelse(is.na(tackle) | tackle == 0, 0, 1), assist = ifelse(is.na(assist) | assist == 0, 0, 1), 
+         forcedFumble = ifelse(is.na(forcedFumble) | forcedFumble == 0, 0, 1)) %>%
+  mutate(tackle_involvement = ifelse(tackle >0 | assist >0 | forcedFumble > 0, 1, 0))  %>%
+  mutate(avg_soi = avg_soi*100, max_soi = max_soi*100) %>%
+  left_join(plays %>% dplyr::select(gameId, playId, possessionTeam, defensiveTeam, quarter, gameClock, down, playDescription) %>% 
+              dplyr::rename(game_id = gameId, play_id = playId), 
+            on = c("play_id, game_id")) %>%
+  left_join(games %>%dplyr::select(gameId, week) %>% dplyr::rename(game_id = gameId), on = "gameId")
+
+
+glm(data = logistic_df %>% dplyr::rename("Max Play % Field Influence" = 'max_soi', "Max Play Expected Yards Saved" = 'max_contribution'), 
+    formula = as.factor(tackle_involvement) ~ `Max Play % Field Influence` + `Max Play Expected Yards Saved`, family = "binomial") %>% 
+  tbl_regression(exponentiate = TRUE) %>% as_gt() %>%
+  gt::tab_header(title = "Logistic Regression: Tackle Involvement ~ EYS + PFI",
+                 subtitle = "For Individual Play Results")
+```
+
+
+
+```{r}
+top_soi <- logistic_df %>%
+  group_by(position) %>%
+  arrange(desc(avg_contribution)) %>%
+  slice_head(n = 5) %>% ungroup() %>%
+  mutate(max_contribution_ci = paste0("[", round(max_contribution_lower, 1), ", ", round(max_contribution_upper, 1), "]"),
+         max_soi_ci = paste0("[", round(max_soi_lower, 1), ", ", round(max_soi_upper, 1), "]")) %>%
+  mutate(position = case_when(position == "DT" ~ "Highest EYS Plays by Defensive Tackles",
+                              position == "NT" ~ "Highest EYS Plays by Nose Tackles",
+                              position == "ILB" ~ "Highest EYS Plays by Interior Linebackers",
+                              position == "MLB" ~ "Highest EYS Plays by Middle Linebackers",
+                              position == "T" ~ "Highest EYS Plays by Tackles",
+                              ))
+```
+
+```{r}
+table_list <- lapply(unique(top_soi$position), function(pos) {
+  pos_data <- top_soi %>%
+    filter(position == pos) %>%
+    dplyr::select(displayName, max_contribution, max_contribution_ci, max_soi, max_soi_ci, possessionTeam, defensiveTeam, playDescription) %>%
+    mutate(max_soi = max_soi/100) %>%
+    `colnames<-`(c("Defender", "Max Play EYS", "CI", "Max Play PFI", "CI ", "Opponent", "Team", "Description")) 
+  
+  gt_table <- gt(pos_data) %>%
+    tab_header(
+      title = pos,
+    ) %>%
+    fmt_number(
+      columns = c(`Max Play EYS`),
+      decimals = 1
+    ) %>% 
+    fmt_percent(
+      columns = c(`Max Play PFI`),
+      decimals = 1
+    ) %>%
+    data_color(columns = c("Max Play PFI"), 
+               colors = col_numeric(palette = "Blues", 
+                                    domain = c(0, 0.3))) %>% 
+    data_color(columns = c("Max Play EYS"), 
+               colors = col_numeric(palette = "Reds", 
+                                    domain = c(0, 30))) %>% 
+    cols_width(Description ~ px(500), everything() ~ px(150))
+  
+  return(gt_table)
+})
+
+table_list
+```
+
+
+
+
+
+
+#### Latex stuff for submission:
+
+$$\begin{bmatrix}
+    \begin{bmatrix} \mu_{x1}& \mu_{y1} \end{bmatrix} \\
+    . \\
+    .\\
+     \begin{bmatrix}  \mu_{xK}& \mu_{yK} \end{bmatrix}   \\
+\end{bmatrix} $$
+
+$$\begin{bmatrix}
+    \begin{bmatrix}
+    \sigma_{x1} & 0 \\
+    0 & \sigma_{y1}   \\
+\end{bmatrix} \\
+. \\
+. \\
+     \begin{bmatrix}
+    \sigma_{xK}& 0 \\
+     0 & \sigma_{yK}   \\
+\end{bmatrix}   \\
+\end{bmatrix} $$
+
+$$\begin{bmatrix}
+    p{1}\\
+    . \\
+    . \\
+     p{K}   \\
+\end{bmatrix} $$
+
+
+$$f(\text{End of Play}_i = \begin{bmatrix} x \\ y \end{bmatrix}) = \sum_{k=1}^{K}p_i \cdot \text{Normal}( \begin{bmatrix} x \\ y \end{bmatrix} ; \mu = \begin{bmatrix} \mu_{xk} \\ \mu_{yk} \end{bmatrix}, \Sigma = \begin{bmatrix}
+    \sigma_{xk}& 0 \\
+     0 & \sigma_{yk}   \\
+\end{bmatrix})  $$
+
+
+$$\text{Pixel}_{i, k} = \sum_{p \in {(\text{Players})}} \frac{S_{X,i}}{(\text{Distance From Grid Point}) \cdot (\text{Player Distance From Ball})} $$
+
+
+
+
+$$\text{Ensemble of GMM} = \sum_m^M  \sum_k^K \frac{p_{km}}{M}\cdot \text{Normal}( \begin{bmatrix} x \\ y \end{bmatrix} ; \mu = \begin{bmatrix} \mu_{xkm} \\ \mu_{ykm} \end{bmatrix}, \Sigma = \begin{bmatrix}
+    \sigma_{xkm}& 0 \\
+     0 & \sigma_{ykm}   \\
+\end{bmatrix}) = \text{New GMM with Redefined Mixture Probabilities} \\ \text{ where m = 'Model #' and k = 'Mixture # in original model'}$$
+
+
+$$\text{TackleNet Weighted Loss } = \sum_{i\in \text{Batch Size}}^B  \left[
+-\mathbf{w_i} \cdot LogSumExp_k^K \left( log(p_k)+LogLik(\text{Normal}( \begin{bmatrix} x \\ y \end{bmatrix} ; \mu = \begin{bmatrix} \mu_{xk} \\ \mu_{yk} \end{bmatrix}, \Sigma = \begin{bmatrix}
+    \sigma_{xk}& 0 \\
+     0 & \sigma_{yk}   \\
+\end{bmatrix})\right)
+\right] \\ \text{ where } \mathbf{w_i} = \frac{1}{\sqrt{(\text{End of Play Gain})_i}}, \text{ } k = \text{Mixture Index}, i = \text{Batch Index}$$
+
+
+
+
+
+
+
+

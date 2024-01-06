@@ -40,7 +40,7 @@ for week in range(1, 10):
 
 
     current_positions['type'] = current_positions['position'].apply(
-        lambda x: "Offense" if x in ["QB", "TE", "WR", "G", "OLB", "RB", "C", "FB"] else "Defense")
+        lambda x: "Offense" if x in ["QB", "TE", "WR", "G", "RB", "C", "FB", "T"] else "Defense")
     current_positions['type'] = current_positions.apply(lambda row: 'Ball' if pd.isna(row['nflId']) else row['type'], axis=1)
     current_positions.loc[current_positions.nflId == current_positions.ballCarrierId, 'type'] = "Carrier"
     current_positions['dir_rad'] = np.radians(current_positions['dir']) # fix degrees

@@ -23,9 +23,9 @@ from matplotlib.colors import Normalize, LinearSegmentedColormap
 
 prepredicted = False
 main_plot = True
-contribution_plot = False
-game_id=2022091108
-play_id=1948
+contribution_plot = True
+game_id=2022103009
+play_id=1152
 
 print("Loading base data")
 print("-----------------")
@@ -164,12 +164,18 @@ def update(frame_id, dataframe, axs, omit_values):
         ax.clear()
 
         dataframe_now = dataframe.query("(frameId == @frame_id) & (omit == @omit)")
-        dataframe_now_metrics = dataframe_now[['frameId', 'exp_contribution']].drop_duplicates().exp_contribution.values
+        dataframe_now_metrics = dataframe_now.drop_duplicates().exp_contribution.values
         min_z = np.min(dataframe.query("(omit == @omit)").prob)
         max_z = np.max(dataframe.query("(omit == @omit)").prob)
         this_def_player = tracking_now_def.query("nflId == @omit")
+
         player_name = this_def_player.displayName.values[0]
-        
+        exp_contribution = round(dataframe_now.drop_duplicates().exp_contribution.values, 1)
+        upper_contribution = round(dataframe_now.drop_duplicates().upper_contribution.values, 1)
+        lower_contribution = round(dataframe_now.drop_duplicates().lower_contribution.values, 1)
+        exp_soi = round(dataframe_now.drop_duplicates().exp_soi.values, 1)
+        lower_soi = round(dataframe_now.drop_duplicates().lower_soi.values, 1)
+        upper_soi = round(dataframe_now.drop_duplicates().upper_soi.values, 1)
         fx = sorted(dataframe_now['x'].unique())
         fy = sorted(dataframe_now['y'].unique())
         z, zerror_lower, zerror_upper = [], [], []
@@ -209,14 +215,14 @@ def update(frame_id, dataframe, axs, omit_values):
                 x_yard, y_yard = np.meshgrid(x_range, y_range)
                 ax.plot_surface(x_yard, y_yard, np.full_like(np.zeros((10,10)), overall_max_z), color="black", alpha=0.5)
     
-        ax.scatter(this_def_player['x'], this_def_player['y'], overall_max_z+overall_max_z/10000, c = dataframe_now_metrics, cmap=custom_cmap_two_way, marker='o', 
+        ax.scatter(this_def_player['x'], this_def_player['y'], overall_max_z+overall_max_z/10000, c = "blue", cmap=custom_cmap_two_way, marker='o', 
                    label='Defense', alpha=1, s = 300, norm = Normalize(vmin=-5, vmax=5))
         ax.scatter(tracking_now_ball['x'], tracking_now_ball['y'], overall_max_z+overall_max_z/10000, c='red', marker='o', label='Ball Carrier', alpha=1,s=300)
         ax.plot_surface(x_field, y_field, np.full_like(np.zeros((10,10)), overall_max_z), color="green", alpha=0.5)
         ax.plot_surface(x_td1, y_td1, np.full_like(np.zeros((10,10)), overall_max_z), color="black", alpha=0.8)
         ax.plot_surface(x_td2, y_td2, np.full_like(np.zeros((10,10)), overall_max_z), color="black", alpha=0.8)
 
-        ax.set_title(f'{player_name}', fontsize=50, pad=20, loc='center', y=0.1)
+        ax.set_title(f'{player_name}: EYS: {exp_contribution} [{lower_contribution}, {upper_contribution}], PFI: {exp_soi} [{lower_soi}, {upper_soi}]', fontsize=50, pad=20, loc='center', y=0.1)
 
         for i in range(len(fy)):
             ax.plot_surface(x[i], y[i], np.array([zerror_upper[i], zerror_lower[i]]), color='grey', alpha=0.01)

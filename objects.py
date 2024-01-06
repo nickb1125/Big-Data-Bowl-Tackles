@@ -77,6 +77,7 @@ class play:
 
     def get_closest_three_def_from_eop(self):
         def_df = self.refine_tracking(frame_id = self.num_frames)["Defense"]
+        def_df=def_df.query("position in ['DT', 'NT', 'ILB', 'MLB']")
         xs, ys = def_df['x'], def_df['y']
         distance_defense_from_ballcarrier = np.sqrt((def_df['x'] - self.eop['eop_x'].values[0])**2 + (def_df['y'] - self.eop['eop_y'].values[0])**2)
         closest_index = np.argsort(distance_defense_from_ballcarrier)[:3]
@@ -89,7 +90,7 @@ class play:
     
     def refine_tracking(self, frame_id):
         this_frame = self.tracking_df.query("frameId == @frame_id")
-        non_dict = this_frame[['nflId', 'x', 'y', 'Sx', 'Sy', 'Ax', 'Ay', 's', 'a', 'dis', 'o', 'dir', 'dir_rad', 'weight', 'type']]
+        non_dict = this_frame[['nflId', 'position', 'x', 'y', 'Sx', 'Sy', 'Ax', 'Ay', 's', 'a', 'dis', 'o', 'dir', 'dir_rad', 'weight', 'type']]
         if len(non_dict.type.unique()) != 4:
             raise ValueError("Not does not account all player types")
         return {player_type : non_dict.loc[(non_dict['type'] == player_type)] 
@@ -254,7 +255,8 @@ class play:
         num_grid_points_90_percent = num_grid_points_90_percent / (50*120)
 
         return {"contribution" : (np.percentile(contributions, axis = 0, q=2.5), np.mean(contributions, axis = 0), np.percentile(contributions, axis = 0, q = 97.5)),
-                "soi" : (np.percentile(num_grid_points_90_percent, axis = 0, q=2.5), np.mean(num_grid_points_90_percent, axis = 0), np.percentile(num_grid_points_90_percent, axis = 0, q = 97.5))}
+                "soi" : (np.percentile(num_grid_points_90_percent, axis = 0, q=2.5), np.mean(num_grid_points_90_percent, axis = 0), np.percentile(num_grid_points_90_percent, axis = 0, q = 97.5)),
+                "doi" : (np.percentile(doi, axis = 0, q=2.5), np.mean(doi, axis = 0), np.percentile(doi, axis = 0, q = 97.5))}
     
     def get_plot_df(self, model):
         # Get df from original (i.e. no player replacement)
@@ -281,6 +283,7 @@ class play:
         output_list = [ret]
         # Predict ommissions
         def_df = self.refine_tracking(frame_id = self.min_frame)["Defense"]
+        def_df=def_df.query("position in ['DE', 'DT', 'NT', 'ILB', 'MLB', 'OLB']")
         def_ids = def_df.nflId.unique()
         for id in tqdm(def_ids):
             print("--------------------------------------------")

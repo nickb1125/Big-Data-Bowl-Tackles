@@ -71,7 +71,7 @@ if train:
                     val_loader = DataLoader(val_data, batch_size=64)
                     model = BivariateGaussianMixture(nmix=nmix)
                     optimizer = optim.Adam(model.parameters(), lr=0.0005)
-                    num_epochs = 25
+                    num_epochs = 35
                     losses = []
                     start_over = False
                     j = 0
@@ -88,7 +88,7 @@ if train:
                                 print("Gradient Exploded, trying to train this model again...")
                                 start_over = True
                                 break
-                            weights = [1/math.sqrt(occurance_dict[int(yardage)]) for yardage in gained]
+                            weights = [1/math.sqrt(occurance_dict[int(yardage)]*100) for yardage in gained]
                             loss = criterion(output, y_batch, class_weights=weights)
                             train_losses.append(loss.detach().item())
                             loss.backward()
@@ -109,7 +109,7 @@ if train:
                                     if (i == 0) & (j % 5 == 0) & (j != 0) & (plot):
                                         pdf_out = get_mixture_pdf(normal_models=outputs[1], pi_models=outputs[0])
                                         plot_field(pdf_output=pdf_out, true=y_batch)
-                                    weights = [1/math.sqrt(occurance_dict[int(yardage)]) for yardage in gained]
+                                    weights = [1/math.sqrt(occurance_dict[int(yardage)]*100) for yardage in gained]
                                     val_loss = criterion(outputs, y_batch, class_weights=weights)
                                     val_losses.append(val_loss.detach().item())
                                     i += 1
@@ -129,7 +129,7 @@ if train:
                             if (i == 0) & (j != 0) & (plot):
                                 pdf_out = get_mixture_pdf(normal_models=outputs[1], pi_models=outputs[0])
                                 plot_field(pdf_output=pdf_out, true=y_batch)
-                            weights = [1/math.sqrt(occurance_dict[int(yardage)]) for yardage in gained]
+                            weights=[1/math.sqrt(occurance_dict[int(yardage)]*100) for yardage in gained]
                             val_loss = criterion(outputs, y_batch, weights)
                             val_losses.append(val_loss.detach().item())
                             i += 1
@@ -167,7 +167,7 @@ if train:
         optimizer = optim.Adam(model.parameters(), lr=0.0005)
 
         # Training loop
-        num_epochs = 25
+        num_epochs = 35
         
         losses = []
         start_over = False
@@ -190,7 +190,7 @@ if train:
                     plot_field(pdf_output=pdf_out, true=y_batch.detach().numpy())
 
                 j+=1
-                weights = [1/math.sqrt(occurance_dict[int(yardage)]) for yardage in gained]
+                weights=[1/math.sqrt(occurance_dict[int(yardage)]*100) for yardage in gained]
                 loss = criterion(output, y_batch, weights)
                 train_losses.append(loss.detach().item())
                 # print(loss)
@@ -222,7 +222,7 @@ if train:
                             print("Plotting for test set")
                             pdf_out = get_mixture_pdf(normal_models=outputs[1], pi_models=outputs[0])
                             plot_field(pdf_output=pdf_out, true=y_batch)
-                        weights = [1/math.sqrt(occurance_dict[int(yardage)]) for yardage in gained]
+                        weights=[1/math.sqrt(occurance_dict[int(yardage)]*100) for yardage in gained]
                         test_loss = criterion(outputs, y_batch, weights)
                         test_losses.append(test_loss.detach().item())
                 test_loss = sum(test_losses)/counter
@@ -251,7 +251,7 @@ for from_end_frame in from_frame_end_values:
             pred = ensemble_model.predict_pdf(X_batch)
             output_model = pred['mixture_return']
             outputs = pred['overall_pred']
-            weights = [1/math.sqrt(occurance_dict[int(yardage)]) for yardage in gained]
+            weights=[1/math.sqrt(occurance_dict[int(yardage)]*100) for yardage in gained]
             test_loss = criterion(output_model, y_batch, weights)
             test_losses.append(test_loss.detach().item())
             if (i == 0) & (plot):
