@@ -129,9 +129,9 @@ plot_features(game_id, play_id)
 
 
 ```{r}
-plays %>% filter(gameId == 2022102000, playId == 1025)
+plays %>% filter(gameId == 2022110604, playId == 3424)
 
-games %>% filter(gameId==2022102000)
+games %>% filter(gameId==2022110604)
 ```
 
 
@@ -166,7 +166,7 @@ loss_df %>% filter(frames_from_eop == 3)
 
 
 ```{r}
-contribution_df <- read.csv(here::here("data/contribution_df.csv"))
+contribution_df <- read.csv(here::here("data/contribution_df_final.csv"))
 
 contribution_df %>% ggplot() + geom_density(aes(x=estimated_contribution)) + xlim(-1, 1)
 contribution_df %>% ggplot() + geom_density(aes(x=estimated_soi)) + xlim(-1, 1)
@@ -198,23 +198,26 @@ glm(data = logistic_df %>% dplyr::rename("Max Play % Field Influence" = 'max_soi
   tbl_regression(exponentiate = TRUE) %>% as_gt() %>%
   gt::tab_header(title = "Logistic Regression: Tackle Involvement ~ EYS + PFI",
                  subtitle = "For Individual Play Results")
-```
 
+logistic_df%>% pivot_longer(cols = c("max_contribution", "max_soi")) %>% ggplot(aes(x = value, group = name, color = name)) + geom_density() + xlim(-0.3, 1) + theme_classic()
+```
 
 
 ```{r}
 top_soi <- logistic_df %>%
-  group_by(position) %>%
-  arrange(desc(avg_contribution)) %>%
-  slice_head(n = 5) %>% ungroup() %>%
   mutate(max_contribution_ci = paste0("[", round(max_contribution_lower, 1), ", ", round(max_contribution_upper, 1), "]"),
          max_soi_ci = paste0("[", round(max_soi_lower, 1), ", ", round(max_soi_upper, 1), "]")) %>%
-  mutate(position = case_when(position == "DT" ~ "Highest EYS Plays by Defensive Tackles",
-                              position == "NT" ~ "Highest EYS Plays by Nose Tackles",
-                              position == "ILB" ~ "Highest EYS Plays by Interior Linebackers",
-                              position == "MLB" ~ "Highest EYS Plays by Middle Linebackers",
-                              position == "T" ~ "Highest EYS Plays by Tackles",
-                              ))
+  mutate(position = case_when(position == "DT" ~ "Highest EYS Plays by Tackles",
+                              position == "NT" ~ "Highest EYS Plays by Tackles",
+                              position == "ILB" ~ "Highest EYS Plays by Linebackers",
+                              position == "OLB" ~ "Highest EYS Plays by Linebackers",
+                              position == "MLB" ~ "Highest EYS Plays by Linebackers",
+                              position == "DE" ~ "Highest EYS Plays by Ends",
+                              )) %>% group_by(position) %>%
+  arrange(desc(max_contribution)) %>%
+  slice_head(n = 3) %>% ungroup()
+
+logistic_df %>% filter(game_id == 2022110604, play_id == 3424)
 ```
 
 ```{r}
@@ -228,6 +231,7 @@ table_list <- lapply(unique(top_soi$position), function(pos) {
   gt_table <- gt(pos_data) %>%
     tab_header(
       title = pos,
+      subtitle = "From Week 9"
     ) %>%
     fmt_number(
       columns = c(`Max Play EYS`),
@@ -241,7 +245,7 @@ table_list <- lapply(unique(top_soi$position), function(pos) {
                colors = col_numeric(palette = "Blues", 
                                     domain = c(0, 0.3))) %>% 
     data_color(columns = c("Max Play EYS"), 
-               colors = col_numeric(palette = "Reds", 
+               colors = col_numeric(palette = "Purples", 
                                     domain = c(0, 30))) %>% 
     cols_width(Description ~ px(500), everything() ~ px(150))
   
@@ -308,7 +312,7 @@ $$\text{TackleNet Weighted Loss } = \sum_{i\in \text{Batch Size}}^B  \left[
     \sigma_{xk}& 0 \\
      0 & \sigma_{yk}   \\
 \end{bmatrix})\right)
-\right] \\ \text{ where } \mathbf{w_i} = \frac{1}{\sqrt{(\text{End of Play Gain})_i}}, \text{ } k = \text{Mixture Index}, i = \text{Batch Index}$$
+\right] \\ \text{ where } \mathbf{w_i} = \frac{1}{\sqrt{(\text{End of Play Gain Occurance Percentage})_i}}, \text{ } k = \text{Mixture Index}, i = \text{Batch Index}$$
 
 
 

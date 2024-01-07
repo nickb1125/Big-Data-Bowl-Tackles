@@ -233,7 +233,7 @@ class play:
         # Get contribution:
         expected_omit = self.get_expected_eop(w_omission_all_pred, return_all_model_results=True)
         expected_orig = self.get_expected_eop(original_predict_object, return_all_model_results=True)
-        contributions = expected_omit-expected_orig # num_mod, num_frame
+        contributions = expected_orig-expected_omit # num_mod, num_frame
         #print(f"Expected Contributions: {np.mean(contributions, axis = 0)}")
 
         # -----------------------------------------

@@ -3,7 +3,7 @@
 
 # Main Goals
 
-* **A shortcoming of the current state of sports analytics is failing to recognize the limitations of our data and the degree of prediction confidence we may have.** Limited data means limited and **varying confidence depending on the in-play situation**, and we should account and report for these varying intervals. From play-call-decision analytics (see Ryan Brill's talk here) to  metrics like those in the BDB, we should start reporting metric confidence. **We estimate variance in prediction by using ensemble model methods for our spatial densities.**
+* **A shortcoming of the current state of sports analytics is failing to recognize the limitations of our data and the degree of prediction confidence we may have.** Limited data means limited and **varying confidence depending on the in-play situation**, and we should account and report for these varying intervals. From play-call-decision analytics to  metrics like those in the BDB, we should start reporting metric confidence. **We estimate variance in prediction by using ensemble model methods for our spatial densities.**
 
 * Tackling encompasses more than big hits: **valuable tacking skills include any type of coersion that reduces the ball carriers yardage** by the end of the play. This can be direct, like the highlight hits you'll see on replay, or indirect like having positioning that manipulates the ball carrier into a worse route or out of bounds. We should have ways of measuring how direct a defenders influence is spatially, and how much he reduces yardage.
 

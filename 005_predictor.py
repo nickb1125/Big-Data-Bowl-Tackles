@@ -21,11 +21,11 @@ import matplotlib.cm as cm
 from matplotlib.colors import Normalize, LinearSegmentedColormap
 
 
-prepredicted = False
-main_plot = True
+prepredicted = True
+main_plot = False
 contribution_plot = True
-game_id=2022103009
-play_id=1152
+game_id=2022110604	
+play_id=3424
 
 print("Loading base data")
 print("-----------------")
@@ -76,7 +76,7 @@ else:
 ### plot 3d predictions with prediction interval
 def update_main(frame_id, dataframe, scatter, ax):
     tracking_now = tracking.query("gameId == @game_id & playId == @play_id & frameId == @frame_id")[['x', 'y', 'type']]
-    tracking_now['x'] = 120 - tracking_now['x']
+    #tracking_now['x'] = 120 - tracking_now['x']
     tracking_now_off = tracking_now.query("type == 'Offense'")
     tracking_now_def = tracking_now.query("type == 'Defense'")
     tracking_now_ball = tracking_now.query("type == 'Ball'")
@@ -86,7 +86,7 @@ def update_main(frame_id, dataframe, scatter, ax):
     fy = sorted(dataframe_now['y'].unique())
     z, zerror_lower, zerror_upper = [], [], []
 
-    overall_max_z = np.max(dataframe.query("(omit == 0)").prob.values)*2
+    overall_max_z = np.max(dataframe.query("(omit == 0)").prob.values)
 
     for y_val in fy:  # Reverse the order of y values
         row_data, error_lower_data, error_upper_data = [], [], []
@@ -100,9 +100,9 @@ def update_main(frame_id, dataframe, scatter, ax):
         zerror_lower.append(error_lower_data)
         zerror_upper.append(error_upper_data)
     
-    z = np.fliplr(z)
-    zerror_lower = np.fliplr(zerror_lower)
-    zerror_upper = np.fliplr(zerror_upper)
+    #z = np.fliplr(z)
+    #zerror_lower = np.fliplr(zerror_lower)
+    #zerror_upper = np.fliplr(zerror_upper)
 
     x, y = np.meshgrid(fx, fy)  # Reverse the order of x and y values
     ax.cla()
@@ -134,7 +134,7 @@ def update_main(frame_id, dataframe, scatter, ax):
     ax.set_title(f'Tackle Probability Density with Prediction Interval', fontweight='bold', fontsize = 40)
 
     for i in range(len(fy)):
-        ax.plot_surface(x[i], y[i], np.array([zerror_upper[i], zerror_lower[i]]), color='white', alpha=0.05)
+        ax.plot_surface(x[i], y[i], np.array([zerror_upper[i], zerror_lower[i]]), color='grey', alpha=0.05)
 
     ax.set_box_aspect([2, 1, 0.5])
     ax.grid(False)
@@ -155,10 +155,10 @@ def update_main(frame_id, dataframe, scatter, ax):
 
 def update(frame_id, dataframe, axs, omit_values):
     tracking_now = tracking.query("gameId == @game_id & playId == @play_id & frameId == @frame_id")[['displayName', 'nflId', 'x', 'y', 'type']]
-    tracking_now['x'] = 120 - tracking_now['x']
+    #tracking_now['x'] = 120 - tracking_now['x']
     tracking_now_def = tracking_now.query("type == 'Defense'")
     tracking_now_ball = tracking_now.query("type == 'Ball'")
-    overall_max_z = np.max(dataframe.query("(omit != 0)").prob.values)
+    overall_max_z = np.max(dataframe.query("(omit != 0)").prob.values)/3
 
     for ax, omit in zip(axs.flatten(), omit_values):
         ax.clear()
@@ -170,12 +170,13 @@ def update(frame_id, dataframe, axs, omit_values):
         this_def_player = tracking_now_def.query("nflId == @omit")
 
         player_name = this_def_player.displayName.values[0]
-        exp_contribution = round(dataframe_now.drop_duplicates().exp_contribution.values, 1)
-        upper_contribution = round(dataframe_now.drop_duplicates().upper_contribution.values, 1)
-        lower_contribution = round(dataframe_now.drop_duplicates().lower_contribution.values, 1)
-        exp_soi = round(dataframe_now.drop_duplicates().exp_soi.values, 1)
-        lower_soi = round(dataframe_now.drop_duplicates().lower_soi.values, 1)
-        upper_soi = round(dataframe_now.drop_duplicates().upper_soi.values, 1)
+        exp_contribution = np.round(dataframe_now.drop_duplicates().exp_contribution.values, 2)[0]
+        upper_contribution = np.round(dataframe_now.drop_duplicates().upper_contribution.values, 2)[0]
+        lower_contribution = np.round(dataframe_now.drop_duplicates().lower_contribution.values, 2)[0]
+        exp_soi = np.round(dataframe_now.drop_duplicates().exp_soi.values, 2)[0]
+        lower_soi = np.round(dataframe_now.drop_duplicates().lower_soi.values, 2)[0]
+        upper_soi = np.round(dataframe_now.drop_duplicates().upper_soi.values, 2)[0]
+
         fx = sorted(dataframe_now['x'].unique())
         fy = sorted(dataframe_now['y'].unique())
         z, zerror_lower, zerror_upper = [], [], []
@@ -193,9 +194,9 @@ def update(frame_id, dataframe, axs, omit_values):
             zerror_lower.append(error_lower_data)
             zerror_upper.append(error_upper_data)
         
-        z = np.fliplr(z)
-        zerror_lower = np.fliplr(zerror_lower)
-        zerror_upper = np.fliplr(zerror_upper)
+        #z = np.fliplr(z)
+        #zerror_lower = np.fliplr(zerror_lower)
+        #zerror_upper = np.fliplr(zerror_upper)
 
         x, y = np.meshgrid(fx, fy)
         ax.plot_surface(x, y, np.array(z), cmap=custom_cmap_two_way, alpha=0.5, label=f'Omit={omit}', norm = Normalize(vmin=-max_z, vmax=max_z))
@@ -222,7 +223,7 @@ def update(frame_id, dataframe, axs, omit_values):
         ax.plot_surface(x_td1, y_td1, np.full_like(np.zeros((10,10)), overall_max_z), color="black", alpha=0.8)
         ax.plot_surface(x_td2, y_td2, np.full_like(np.zeros((10,10)), overall_max_z), color="black", alpha=0.8)
 
-        ax.set_title(f'{player_name}: EYS: {exp_contribution} [{lower_contribution}, {upper_contribution}], PFI: {exp_soi} [{lower_soi}, {upper_soi}]', fontsize=50, pad=20, loc='center', y=0.1)
+        ax.set_title(f'{player_name} \n EYS: {exp_contribution} [{lower_contribution}, {upper_contribution}], \n PFI: {exp_soi*100}% [{lower_soi*100}, {upper_soi*100}]', fontsize=50, pad=20, loc='center', y=0.1)
 
         for i in range(len(fy)):
             ax.plot_surface(x[i], y[i], np.array([zerror_upper[i], zerror_lower[i]]), color='grey', alpha=0.01)
