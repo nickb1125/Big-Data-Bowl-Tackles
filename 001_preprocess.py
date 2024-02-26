@@ -20,24 +20,18 @@ for week in range(1, 10):
     tracking['week'] = week
 
     # remove unneccecary frames
-    tracking_ball_remove_no_event = tracking.query("(displayName == 'football')").groupby(['playId', 'gameId']).filter(lambda x: (x['event'].isin(["pass_outcome_caught",
-                                                                        "run", "handoff"])).sum() > 0)
-    tracking_ball_remove_no_event['is_start_event'] = tracking_ball_remove_no_event['event'].isin(["pass_outcome_caught", "run", "handoff"]).astype(int)
-    no_pre_event = tracking_ball_remove_no_event[tracking_ball_remove_no_event.groupby(['playId', 'gameId'])['is_start_event'].cumsum().eq(1)]
-    tracking_ball_remove_no_end = no_pre_event.query("(displayName == 'football')").groupby(['playId', 'gameId']).filter(lambda x: (x['event'].isin(
-        ['pass_outcome_touchdown', 'tackle', 'touchdown', 'fumble', 'out_of_bounds', 'qb_slide'])).sum() > 0)
+    tracking_ball_remove_no_event = tracking.query("(displayName == 'football')").groupby(['playId', 'gameId']).filter(
+        lambda x: (x['event'].isin(["pass_forward", "run", "handoff"])).sum() > 0)
+    tracking_ball_remove_no_end = tracking_ball_remove_no_event.query("(displayName == 'football')").groupby(['playId', 'gameId']).filter(
+        lambda x: (x['event'].isin(['pass_outcome_touchdown', 'tackle', 'touchdown', 'fumble', 'out_of_bounds', 'qb_slide'])).sum() > 0)
     tracking_ball_remove_no_end['is_end_event'] = tracking_ball_remove_no_end['event'].isin(
         ['pass_outcome_touchdown', 'tackle', 'touchdown', 'fumble', 'out_of_bounds', 'qb_slide']).astype(int)
-    no_post_end = tracking_ball_remove_no_end[tracking_ball_remove_no_end.groupby(['playId', 'gameId'])['is_end_event'].cumsum().eq(0)]
-
-    final_tracking = no_post_end[['gameId', 'playId', 'frameId']].drop_duplicates().merge(tracking, how = 'left', on = ['gameId', 'playId', 'frameId'])
+    final_tracking = tracking_ball_remove_no_end[['gameId', 'playId', 'frameId']].drop_duplicates().merge(tracking, how = 'left', on = ['gameId', 'playId', 'frameId'])
 
     # add needed features
 
     current_positions = final_tracking.merge(players, on = "nflId", how = "left")
     current_positions = current_positions.merge(plays, on = ['gameId', 'playId'], how = "left")
-    current_positions = current_positions.loc[current_positions['passLength'].isna() | (current_positions['passLength'] <= 0), :]
-
 
     current_positions['type'] = current_positions['position'].apply(
         lambda x: "Offense" if x in ["QB", "TE", "WR", "G", "RB", "C", "FB", "T"] else "Defense")
@@ -50,3 +44,4 @@ for week in range(1, 10):
     current_positions['Ax'] = current_positions['a'] * np.sin(current_positions['dir_rad'])
 
     current_positions.to_csv(f"data/nfl-big-data-bowl-2024/tracking_a_week_{week}.csv")
+

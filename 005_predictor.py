@@ -21,11 +21,11 @@ import matplotlib.cm as cm
 from matplotlib.colors import Normalize, LinearSegmentedColormap
 
 
-prepredicted = True
-main_plot = False
+prepredicted = False
+main_plot = True
 contribution_plot = True
-game_id=2022110604	
-play_id=3424
+game_id=2022110609
+play_id=3483
 
 print("Loading base data")
 print("-----------------")
@@ -33,9 +33,9 @@ print("-----------------")
 # Read and combine tracking data for all weeks
 tracking = pd.concat([pd.read_csv(f"data/nfl-big-data-bowl-2024/tracking_a_week_{week}.csv") for week in range(1, 10)])
 
-colors = [(0, 0, 0), (1, 0, 0)]  # Grey to Red
+colors = [(0.9, 0.9, 0.9), (1, 0, 0)]  # Grey to Red
 custom_cmap = LinearSegmentedColormap.from_list("CustomReds", colors, N=256)
-colors = [(0, 0, 1), (0.5, 0.5, 0.5), (1, 0, 0)]  # Blue to Grey to Red
+colors = [(0, 0, 1), (0.9, 0.9, 0.9), (1, 0, 0)]  # Blue to Grey to Red
 custom_cmap_two_way = LinearSegmentedColormap.from_list('blue_to_grey_to_red', colors, N=256)
 x_range = np.linspace(0, 10, 10)  # 100 points between 0 and 10
 y_range = np.linspace(0, 54, 10)  # 100 points between 0 and 54
@@ -86,7 +86,7 @@ def update_main(frame_id, dataframe, scatter, ax):
     fy = sorted(dataframe_now['y'].unique())
     z, zerror_lower, zerror_upper = [], [], []
 
-    overall_max_z = np.max(dataframe.query("(omit == 0)").prob.values)
+    overall_max_z = np.max(dataframe.query("(omit == 0)").upper.values)
 
     for y_val in fy:  # Reverse the order of y values
         row_data, error_lower_data, error_upper_data = [], [], []
@@ -134,7 +134,7 @@ def update_main(frame_id, dataframe, scatter, ax):
     ax.set_title(f'Tackle Probability Density with Prediction Interval', fontweight='bold', fontsize = 40)
 
     for i in range(len(fy)):
-        ax.plot_surface(x[i], y[i], np.array([zerror_upper[i], zerror_lower[i]]), color='grey', alpha=0.05)
+        ax.plot_surface(x[i], y[i], np.array([zerror_upper[i], zerror_lower[i]]), color='red', alpha=0.01)
 
     ax.set_box_aspect([2, 1, 0.5])
     ax.grid(False)
@@ -158,7 +158,7 @@ def update(frame_id, dataframe, axs, omit_values):
     #tracking_now['x'] = 120 - tracking_now['x']
     tracking_now_def = tracking_now.query("type == 'Defense'")
     tracking_now_ball = tracking_now.query("type == 'Ball'")
-    overall_max_z = np.max(dataframe.query("(omit != 0)").prob.values)/3
+    overall_max_z = np.max(dataframe.query("(omit != 0)").upper.values)
 
     for ax, omit in zip(axs.flatten(), omit_values):
         ax.clear()
@@ -206,7 +206,7 @@ def update(frame_id, dataframe, axs, omit_values):
         for yardline in range(15, 110, 5):
             x_range = np.linspace(yardline-0.1, yardline+0.1, 10)
             x_yard, y_yard = np.meshgrid(x_range, y_range)
-            ax.plot_surface(x_yard, y_yard, np.full_like(np.zeros((10,10)), overall_max_z), color="black", alpha=0.5)
+            ax.plot_surface(x_yard, y_yard, np.full_like(np.zeros((10,10)), overall_max_z), color="grey", alpha=0.3)
         tick_1_y = (54/2) + (6.16/2)
         tick_2_y = (54/2) - (6.16/2)
         for tick in range(10, 110, 1):
@@ -226,7 +226,7 @@ def update(frame_id, dataframe, axs, omit_values):
         ax.set_title(f'{player_name} \n EYS: {exp_contribution} [{lower_contribution}, {upper_contribution}], \n PFI: {exp_soi*100}% [{lower_soi*100}, {upper_soi*100}]', fontsize=50, pad=20, loc='center', y=0.1)
 
         for i in range(len(fy)):
-            ax.plot_surface(x[i], y[i], np.array([zerror_upper[i], zerror_lower[i]]), color='grey', alpha=0.01)
+            ax.plot_surface(x[i], y[i], np.array([zerror_upper[i], zerror_lower[i]]), color='red', alpha=0.01)
 
         ax.set_box_aspect([2, 1, 1])
         ax.grid(False)
@@ -271,7 +271,7 @@ if contribution_plot:
 
     # Save the animation as a GIF
     print("Saving.")
-    animation.save(f'{game_id}_{play_id}_contribution_animation.gif', writer='pillow', fps=10)
+    animation.save(f'plot_1_contribution_animation.gif', writer='pillow', fps=10)
     print("Done.")
 
 if main_plot:
@@ -295,11 +295,8 @@ if main_plot:
 
     # Save the animation as a GIF
     print("Saving.")
-    animation.save(f'{game_id}_{play_id}_animation.gif', writer='pillow', fps=10)
+    animation.save(f'plot_1_animation.gif', writer='pillow', fps=10)
     print("Done.")
-
-
-
 
 
 

@@ -23,6 +23,8 @@ library(gt)
 library(gtExtras)
 ```
 
+
+
 ```{r}
 games <- read.csv(here::here("data/nfl-big-data-bowl-2024/games.csv"))
 players <- read.csv(here::here("data/nfl-big-data-bowl-2024/players.csv")) %>% 
@@ -30,7 +32,7 @@ players <- read.csv(here::here("data/nfl-big-data-bowl-2024/players.csv")) %>%
   dplyr::select(displayName, nflId, height, weight, position)
 plays <- read.csv(here::here("data/nfl-big-data-bowl-2024/plays.csv"))
 tackles <- read.csv(here::here("data/nfl-big-data-bowl-2024/tackles.csv")) %>%
-  left_join(games %>% dplyr::select(gameId, week), on = "gameId")
+  left_join(games %>% dplyr::select(gameId, week), by = "gameId")
 tracking <- do.call(rbind, lapply(seq(1, 9), function(week) {read.csv(here::here(paste0("data/nfl-big-data-bowl-2024/tracking_a_week_", week, ".csv")))}))
 contracts <- nflreadr::load_contracts(file_type = getOption("nflreadr.prefer", default = "rds"))
 contracts <- contracts %>%
@@ -182,15 +184,15 @@ logistic_df <- contribution_df %>%
   distinct()  %>%
   left_join(
     tackles %>% dplyr::select(gameId, playId, nflId, tackle, assist, forcedFumble) %>% dplyr::rename(game_id = gameId, play_id = playId),
-    on = c("game_id", "play_id", "nflId")) %>%
+    by = c("game_id", "play_id", "nflId")) %>%
   mutate(tackle = ifelse(is.na(tackle) | tackle == 0, 0, 1), assist = ifelse(is.na(assist) | assist == 0, 0, 1), 
          forcedFumble = ifelse(is.na(forcedFumble) | forcedFumble == 0, 0, 1)) %>%
   mutate(tackle_involvement = ifelse(tackle >0 | assist >0 | forcedFumble > 0, 1, 0))  %>%
   mutate(avg_soi = avg_soi*100, max_soi = max_soi*100) %>%
   left_join(plays %>% dplyr::select(gameId, playId, possessionTeam, defensiveTeam, quarter, gameClock, down, playDescription) %>% 
               dplyr::rename(game_id = gameId, play_id = playId), 
-            on = c("play_id, game_id")) %>%
-  left_join(games %>%dplyr::select(gameId, week) %>% dplyr::rename(game_id = gameId), on = "gameId")
+            by = c("play_id", "game_id")) %>%
+  left_join(games %>% dplyr::select(gameId, week) %>% dplyr::rename(game_id = gameId), by = "game_id")
 
 
 glm(data = logistic_df %>% dplyr::rename("Max Play % Field Influence" = 'max_soi', "Max Play Expected Yards Saved" = 'max_contribution'), 
@@ -199,7 +201,7 @@ glm(data = logistic_df %>% dplyr::rename("Max Play % Field Influence" = 'max_soi
   gt::tab_header(title = "Logistic Regression: Tackle Involvement ~ EYS + PFI",
                  subtitle = "For Individual Play Results")
 
-logistic_df%>% pivot_longer(cols = c("max_contribution", "max_soi")) %>% ggplot(aes(x = value, group = name, color = name)) + geom_density() + xlim(-0.3, 1) + theme_classic()
+logistic_df %>% pivot_longer(cols = c("max_contribution", "max_soi")) %>% ggplot(aes(x = value, group = name, color = name)) + geom_density() + xlim(-0.3, 1) + theme_classic()
 ```
 
 
@@ -256,7 +258,13 @@ table_list
 ```
 
 
+```{r}
+max_frame_df <- tracking %>% dplyr::select(playId, gameId, frameId) %>% group_by(playId, gameId) %>% dplyr::summarize(max_frame = max(frameId)) %>% ungroup() %>%
+  dplyr::rename(game_id = gameId, play_id = playId)
 
+contribution_df %>% left_join(max_frame_df, by = c("game_id", "play_id")) %>%
+  filter(max_frame > 30) %>% filter(rank(-estimated_contribution) < 30)
+```
 
 
 
